@@ -1,4 +1,4 @@
-const POSEIDON_BUILD = "5.2.0";
+const POSEIDON_BUILD = "5.2.1";
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -54,11 +54,11 @@ const defaultConfig = () => ({
     id: "zone-default",
     name: "출입 제한 구역",
     severity: "high",
-    enabled: true,
+    enabled: false,
     points: [[0.62, 0.28], [0.95, 0.28], [0.95, 0.93], [0.62, 0.93]],
   }],
   rules: {
-    dangerZone: true,
+    dangerZone: false,
     helmet: true,
     safetyGlasses: true,
     mask: true,
@@ -1009,7 +1009,7 @@ function loadGuardProfile() {
   $("#guardSite").value = saved.site || "POSCO Future M 시연 현장";
   $("#guardArea").value = saved.area || "안전 시연구역";
   $("#guardVoiceEnabled").checked = saved.voiceEnabled !== false;
-  $("#guardZoneEnabled").checked = saved.zoneEnabled !== false;
+  $("#guardZoneEnabled").checked = saved.zoneEnabled === true;
 }
 
 function saveGuardProfile() {
@@ -1101,7 +1101,7 @@ function updateGuardUi() {
   $("#guardStatusPill").classList.toggle("online", active);
   $("#guardStatusPill b").textContent = active ? "관제 연결" : starting ? "시작 중" : "대기 중";
   $("#guardConnectionMetric").textContent = active ? "ONLINE" : "OFFLINE";
-  $("#guardModelMetric").textContent = guard.modelReady ? "PPE ON · v4.5" : guard.modelError ? "모델 오류" : active ? "준비 중" : "대기";
+  $("#guardModelMetric").textContent = guard.modelReady ? "PPE ON · v5.2.1" : guard.modelError ? "모델 오류" : active ? "준비 중" : "대기";
   $("#guardPeopleMetric").textContent = `${guard.peopleCount}명`;
   $("#guardFpsMetric").textContent = `${guard.inferenceFps.toFixed(1)} FPS`;
   updateGuardViewerCount();
@@ -1162,7 +1162,7 @@ async function sendGuardHeartbeat() {
 
 function startGuardWorker() {
   guard.worker?.terminate();
-  guard.worker = new Worker("/ppe-worker.js?v=4.5.0");
+  guard.worker = new Worker("/ppe-worker.js?v=5.2.1");
   guard.modelReady = false;
   guard.modelError = null;
   $("#ppeLoading").hidden = false;
@@ -1259,7 +1259,7 @@ function processGuardDetections(message) {
   const noHarness = detections.filter((item) => item.label === "No_Harness");
   const falls = detections.filter((item) => item.label === "Fall-Detected");
   const zonePeople = assessments.map((item) => item.anchor);
-  const zoneEntries = rules.dangerZone !== false && $("#guardZoneEnabled").checked
+  const zoneEntries = isGuardZoneActive()
     ? detectZoneEntries(zonePeople, message.sourceWidth, message.sourceHeight)
     : [];
 
@@ -1495,6 +1495,12 @@ function confirmViolation(key, event) {
   }
 }
 
+function isGuardZoneActive() {
+  const localEnabled = $("#guardZoneEnabled")?.checked === true;
+  const remoteRuleEnabled = guard.config?.rules?.dangerZone !== false;
+  return localEnabled && remoteRuleEnabled;
+}
+
 function detectZoneEntries(persons, sourceWidth, sourceHeight) {
   const zones = (guard.config.zones || []).filter((zone) => zone.enabled !== false && Array.isArray(zone.points) && zone.points.length >= 3);
   const entries = [];
@@ -1521,7 +1527,9 @@ function drawGuardOverlay(detections = [], sourceWidth = 0, sourceHeight = 0, zo
   const canvas = $("#guardOverlay");
   const ctx = canvas.getContext("2d");
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  const zones = (guard.config.zones || []).filter((zone) => zone.enabled !== false && Array.isArray(zone.points));
+  const zones = isGuardZoneActive()
+    ? (guard.config.zones || []).filter((zone) => zone.enabled !== false && Array.isArray(zone.points) && zone.points.length >= 3)
+    : [];
   for (const zone of zones) {
     ctx.beginPath();
     zone.points.forEach(([x, y], index) => index ? ctx.lineTo(x * canvas.width, y * canvas.height) : ctx.moveTo(x * canvas.width, y * canvas.height));
@@ -1711,9 +1719,10 @@ async function loadSelectedZone() {
     const config = await api(`/api/devices/${encodeURIComponent(deviceId)}/config`);
     state.zoneConfig = config;
     const zone = config.zones?.[0] || defaultConfig().zones[0];
-    state.zonePoints = [...zone.points.map(([x, y]) => [x, y])];
+    state.zonePoints = [...(Array.isArray(zone.points) ? zone.points : []).map(([x, y]) => [x, y])];
     $("#zoneName").value = zone.name || "출입 제한 구역";
     $("#zoneSeverity").value = zone.severity || "high";
+    $("#zoneEnabledAdmin").checked = zone.enabled !== false && config.rules?.dangerZone !== false;
     const device = state.devices.find((item) => item.id === deviceId);
     state.zoneBackground = device?.previewUrl || null;
     drawZoneCanvas();
@@ -1760,11 +1769,20 @@ function drawZonePolygon(ctx, canvas) {
 async function saveZone() {
   const deviceId = $("#zoneDeviceSelect").value;
   if (!deviceId) return toast("대상 장치를 선택해주세요.");
-  if (state.zonePoints.length < 3) return toast("위험구역 꼭짓점을 3개 이상 지정해주세요.");
+  const enabled = $("#zoneEnabledAdmin")?.checked === true;
+  if (enabled && state.zonePoints.length < 3) return toast("위험구역을 사용할 때는 꼭짓점을 3개 이상 지정해주세요.");
   const config = state.zoneConfig || await api(`/api/devices/${encodeURIComponent(deviceId)}/config`);
-  config.zones = [{ id: "zone-main", name: $("#zoneName").value.trim() || "출입 제한 구역", severity: $("#zoneSeverity").value, enabled: true, points: state.zonePoints }];
+  config.rules = { ...(config.rules || {}), dangerZone: enabled };
+  config.zones = [{
+    id: "zone-main",
+    name: $("#zoneName").value.trim() || "출입 제한 구역",
+    severity: $("#zoneSeverity").value,
+    enabled,
+    points: state.zonePoints,
+  }];
+  state.zoneConfig = config;
   await api(`/api/devices/${encodeURIComponent(deviceId)}/config`, { method: "PUT", body: JSON.stringify({ config }) });
-  toast("위험구역을 저장했습니다. 현장 지킴이에 자동 반영됩니다.");
+  toast(enabled ? "위험구역을 저장하고 감지를 활성화했습니다." : "위험구역 감지를 해제했습니다.");
 }
 
 function clearZone() {
@@ -1855,6 +1873,16 @@ function exportEvents() {
   URL.revokeObjectURL(link.href);
 }
 
+function handleGuardZoneToggle() {
+  const enabled = $("#guardZoneEnabled").checked === true;
+  const saved = JSON.parse(localStorage.getItem("ssg-guard-profile") || "{}");
+  localStorage.setItem("ssg-guard-profile", JSON.stringify({ ...saved, zoneEnabled: enabled }));
+  guard.streaks.set("zone", 0);
+  if (!enabled) guard.lastEvents.delete("zone");
+  drawGuardOverlay(guard.detections, guard.latestSourceWidth, guard.latestSourceHeight, [], guard.latestAssessments);
+  toast(enabled ? "위험구역 감지를 켰습니다." : "위험구역 감지를 껐습니다. 구역 표시와 경고가 중지됩니다.");
+}
+
 function bindEvents() {
   $("#loginForm").addEventListener("submit", login);
   $$('[data-login-role]').forEach((button) => button.addEventListener("click", () => setLoginRole(button.dataset.loginRole)));
@@ -1866,6 +1894,7 @@ function bindEvents() {
 
   [$("#guardStartButton"), $("#guardTopButton")].forEach((button) => button.addEventListener("click", toggleGuard));
   $("#guardSaveProfile").addEventListener("click", saveGuardProfile);
+  $("#guardZoneEnabled").addEventListener("change", handleGuardZoneToggle);
   $("#guardCameraSelect").addEventListener("change", restartGuardCamera);
   $("#guardCallAdminButton").addEventListener("click", initiateGuardCall);
   $("#guardTrainingWorker").addEventListener("change", () => updateTrainingFeedback());
