@@ -1,4 +1,4 @@
-const POSEIDON_BUILD = "5.2.1";
+const POSEIDON_BUILD = "5.3.0";
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -127,6 +127,21 @@ const guard = {
   latestSourceWidth: 0,
   latestSourceHeight: 0,
   trainingSavedCount: Number(localStorage.getItem("poseidon_training_saved") || 0),
+  autoTraining: {
+    active: false,
+    intervalTimer: null,
+    uiTimer: null,
+    startedAt: 0,
+    durationSeconds: 30,
+    intervalSeconds: 2,
+    saved: 0,
+    skipped: 0,
+    errors: 0,
+    busy: false,
+    lastFingerprint: null,
+    labels: null,
+  },
+  trainingStorage: { deviceBytes: 0, globalBytes: 0, deviceSamples: 0, globalSamples: 0 },
 };
 
 const callState = {
@@ -1415,7 +1430,7 @@ function updateTrainingFeedback(assessments = guard.latestAssessments || []) {
   $("#trainingSavedCount").textContent = `${guard.trainingSavedCount}건`;
 }
 
-function captureWorkerTrainingCrop(worker, quality = 0.72, maxSize = 640) {
+function captureWorkerTrainingCrop(worker, quality = 0.62, maxSize = 512) {
   const video = $("#guardVideo");
   if (!video.videoWidth || !worker?.anchor || !guard.latestSourceWidth || !guard.latestSourceHeight) return null;
   const a = worker.anchor;
@@ -1436,29 +1451,113 @@ function captureWorkerTrainingCrop(worker, quality = 0.72, maxSize = 640) {
   return canvas.toDataURL("image/jpeg", quality);
 }
 
-async function saveTrainingSample() {
-  if (!guard.active) return toast("먼저 지킴이를 시작해주세요.");
-  const index = Number($("#guardTrainingWorker").value || 0);
-  const worker = guard.latestAssessments[index];
-  if (!worker) return toast("학습할 작업자를 먼저 감지해주세요.");
+function computeWorkerTrainingFingerprint(worker) {
+  const video = $("#guardVideo");
+  if (!video.videoWidth || !worker?.anchor || !guard.latestSourceWidth || !guard.latestSourceHeight) return null;
+  const a = worker.anchor;
+  const sxScale = video.videoWidth / guard.latestSourceWidth;
+  const syScale = video.videoHeight / guard.latestSourceHeight;
+  const padX = a.width * 0.18;
+  const padY = a.height * 0.12;
+  const sx = Math.max(0, (a.x - padX) * sxScale);
+  const sy = Math.max(0, (a.y - padY) * syScale);
+  const sw = Math.min(video.videoWidth - sx, (a.width + padX * 2) * sxScale);
+  const sh = Math.min(video.videoHeight - sy, (a.height + padY * 2) * syScale);
+  if (sw < 32 || sh < 32) return null;
+  const canvas = document.createElement("canvas");
+  canvas.width = 12;
+  canvas.height = 12;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  ctx.drawImage(video, sx, sy, sw, sh, 0, 0, 12, 12);
+  const pixels = ctx.getImageData(0, 0, 12, 12).data;
+  const signature = new Uint8Array(144);
+  for (let i = 0, p = 0; i < pixels.length; i += 4, p += 1) {
+    signature[p] = Math.round((pixels[i] * 0.299) + (pixels[i + 1] * 0.587) + (pixels[i + 2] * 0.114));
+  }
+  return signature;
+}
+
+function trainingFingerprintDistance(a, b) {
+  if (!a || !b || a.length !== b.length) return 1;
+  let sum = 0;
+  for (let i = 0; i < a.length; i += 1) sum += Math.abs(a[i] - b[i]);
+  return sum / (a.length * 255);
+}
+
+function getTrainingLabels({ requireDefinite = false } = {}) {
   const labels = {
-    helmet: $("#trainingHatLabel").value,
-    goggles: $("#trainingGogLabel").value,
-    mask: $("#trainingMaskLabel").value,
+    helmet: $("#trainingHatLabel")?.value || "",
+    goggles: $("#trainingGogLabel")?.value || "",
+    mask: $("#trainingMaskLabel")?.value || "",
   };
-  if (!labels.helmet || !labels.goggles || !labels.mask) return toast("안전모·보안경·마스크 실제 상태를 모두 선택해주세요.", 4500);
+  if (!labels.helmet || !labels.goggles || !labels.mask) return null;
+  if (requireDefinite && Object.values(labels).some((value) => value === "unknown")) return null;
+  return labels;
+}
+
+function formatTrainingBytes(bytes) {
+  const value = Math.max(0, Number(bytes || 0));
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+  return `${(value / 1024 / 1024).toFixed(1)} MB`;
+}
+
+async function refreshTrainingStorageStats() {
+  const deviceId = getGuardDeviceId();
+  if (!deviceId || !$("#trainingStorageText")) return;
+  try {
+    const response = await api(`/api/training/stats?deviceId=${encodeURIComponent(deviceId)}`);
+    const data = response.data || response;
+    guard.trainingStorage = data;
+    const softLimit = Number(data.softLimitBytes || (300 * 1024 * 1024));
+    const globalBytes = Number(data.globalBytes || 0);
+    const pct = Math.min(100, (globalBytes / softLimit) * 100);
+    $("#trainingStorageText").textContent = `이 장치 ${data.deviceSamples || 0}건 · ${formatTrainingBytes(data.deviceBytes)} / 전체 학습이미지 ${formatTrainingBytes(globalBytes)}`;
+    $("#trainingStorageBar").style.width = `${pct}%`;
+    $("#trainingStorageBar").classList.toggle("warning", pct >= 80);
+    $("#trainingStorageHint").textContent = pct >= 100
+      ? "학습이미지 권장 한도 300MB에 도달했습니다. 내보낸 뒤 오래된 데이터를 정리하세요."
+      : `무료 D1 500MB/DB 중 학습이미지는 300MB를 권장 상한으로 사용합니다. (${pct.toFixed(0)}%)`;
+  } catch (error) {
+    $("#trainingStorageText").textContent = "저장용량 조회 대기";
+  }
+}
+
+async function saveTrainingSample(options = {}) {
+  const { silent = false, auto = false, workerOverride = null, labelsOverride = null } = options;
+  if (!guard.active) {
+    if (!silent) toast("먼저 지킴이를 시작해주세요.");
+    return false;
+  }
+  const index = Number($("#guardTrainingWorker")?.value || 0);
+  const worker = workerOverride || guard.latestAssessments[index];
+  if (!worker) {
+    if (!silent) toast("학습할 작업자를 먼저 감지해주세요.");
+    return false;
+  }
+  const labels = labelsOverride || getTrainingLabels();
+  if (!labels) {
+    if (!silent) toast("안전모·보안경·마스크 실제 상태를 모두 선택해주세요.", 4500);
+    return false;
+  }
   const snapshotBase64 = captureWorkerTrainingCrop(worker);
-  if (!snapshotBase64) return toast("작업자 이미지를 캡처하지 못했습니다.");
+  if (!snapshotBase64) {
+    if (!silent) toast("작업자 이미지를 캡처하지 못했습니다.");
+    return false;
+  }
   const predictions = {
     helmet: { state: worker.helmet.state, score: worker.helmet.score || 0 },
     goggles: { state: worker.goggles.state, score: worker.goggles.score || 0 },
     mask: { state: worker.mask.state, score: worker.mask.score || 0 },
     anchor: worker.anchor,
+    _meta: { captureMode: auto ? "auto" : "manual" },
   };
   const button = $("#saveTrainingSample");
-  button.disabled = true;
-  const old = button.textContent;
-  button.textContent = "저장 중...";
+  const old = button?.textContent;
+  if (!auto && button) {
+    button.disabled = true;
+    button.textContent = "저장 중...";
+  }
   try {
     await api("/api/training/samples", {
       method: "POST",
@@ -1473,14 +1572,119 @@ async function saveTrainingSample() {
     });
     guard.trainingSavedCount += 1;
     localStorage.setItem("poseidon_training_saved", String(guard.trainingSavedCount));
-    $("#trainingSavedCount").textContent = `${guard.trainingSavedCount}건`;
-    toast("학습 후보 데이터를 저장했습니다. 검수 후 모델 재학습에 사용합니다.", 5000);
+    if ($("#trainingSavedCount")) $("#trainingSavedCount").textContent = `${guard.trainingSavedCount}건`;
+    if (!silent) toast("학습 후보 데이터를 저장했습니다. 검수 후 모델 재학습에 사용합니다.", 5000);
+    return true;
   } catch (error) {
-    toast(`학습데이터 저장 실패: ${error.message}`, 5500);
+    if (!silent) toast(`학습데이터 저장 실패: ${error.message}`, 5500);
+    return false;
   } finally {
-    button.disabled = false;
-    button.textContent = old;
+    if (!auto && button) {
+      button.disabled = false;
+      button.textContent = old;
+    }
   }
+}
+
+function renderAutoTrainingStatus(message = "대기") {
+  const state = guard.autoTraining;
+  if (!$("#autoTrainingStatus")) return;
+  const elapsed = state.active ? Math.min(state.durationSeconds, (Date.now() - state.startedAt) / 1000) : 0;
+  const pct = state.active ? Math.min(100, (elapsed / state.durationSeconds) * 100) : 0;
+  $("#autoTrainingStatus").textContent = message;
+  $("#autoTrainingProgress").style.width = `${pct}%`;
+  $("#autoTrainingCounts").textContent = `저장 ${state.saved} · 중복 제외 ${state.skipped} · 오류 ${state.errors}`;
+}
+
+async function runAutoTrainingCapture() {
+  const state = guard.autoTraining;
+  if (!state.active || state.busy) return;
+  if (guard.latestAssessments.length !== 1) {
+    state.skipped += 1;
+    renderAutoTrainingStatus("화면에 작업자 1명만 유지해주세요.");
+    return;
+  }
+  const globalBytes = Number(guard.trainingStorage?.globalBytes || 0);
+  const softLimit = Number(guard.trainingStorage?.softLimitBytes || (300 * 1024 * 1024));
+  if (globalBytes >= softLimit) {
+    stopAutoTraining("저장 권장 한도에 도달해 자동수집을 중지했습니다.");
+    return;
+  }
+  const worker = guard.latestAssessments[0];
+  const fingerprint = computeWorkerTrainingFingerprint(worker);
+  if (!fingerprint) {
+    state.skipped += 1;
+    renderAutoTrainingStatus("작업자 화면을 확인하는 중입니다.");
+    return;
+  }
+  const distance = trainingFingerprintDistance(fingerprint, state.lastFingerprint);
+  if (state.lastFingerprint && distance < 0.012) {
+    state.skipped += 1;
+    renderAutoTrainingStatus("거의 같은 장면은 자동으로 건너뜁니다. 고개·거리·각도를 조금 바꿔주세요.");
+    return;
+  }
+  state.busy = true;
+  const ok = await saveTrainingSample({ silent: true, auto: true, workerOverride: worker, labelsOverride: state.labels });
+  state.busy = false;
+  if (ok) {
+    state.saved += 1;
+    state.lastFingerprint = fingerprint;
+    renderAutoTrainingStatus("학습 장면을 저장했습니다. 자세와 각도를 천천히 바꿔주세요.");
+    if (state.saved % 5 === 0) refreshTrainingStorageStats();
+  } else {
+    state.errors += 1;
+    renderAutoTrainingStatus("저장 오류가 발생했습니다. 연결 상태를 확인해주세요.");
+  }
+}
+
+function startAutoTraining() {
+  if (guard.autoTraining.active) return;
+  if (!guard.active) return toast("먼저 지킴이를 시작해주세요.");
+  if (guard.latestAssessments.length !== 1) return toast("정확한 학습을 위해 화면에 작업자 1명만 나오게 해주세요.", 5500);
+  const labels = getTrainingLabels({ requireDefinite: true });
+  if (!labels) return toast("자동학습은 안전모·보안경·마스크를 각각 '착용' 또는 '미착용'으로 선택해주세요.", 6000);
+  if (Number(guard.trainingStorage?.globalBytes || 0) >= Number(guard.trainingStorage?.softLimitBytes || (300 * 1024 * 1024))) {
+    return toast("학습 이미지 권장 저장 한도에 도달했습니다. 먼저 데이터를 내보내고 정리해주세요.", 6000);
+  }
+  const durationSeconds = Math.max(10, Math.min(180, Number($("#autoTrainingDuration").value || 30)));
+  const intervalSeconds = Math.max(1, Math.min(10, Number($("#autoTrainingInterval").value || 2)));
+  Object.assign(guard.autoTraining, {
+    active: true,
+    startedAt: Date.now(),
+    durationSeconds,
+    intervalSeconds,
+    saved: 0,
+    skipped: 0,
+    errors: 0,
+    busy: false,
+    lastFingerprint: null,
+    labels: { ...labels },
+  });
+  $("#autoTrainingStart").disabled = true;
+  $("#autoTrainingStop").disabled = false;
+  renderAutoTrainingStatus("자동수집 시작 · 고개·거리·각도를 천천히 바꿔주세요.");
+  runAutoTrainingCapture();
+  guard.autoTraining.intervalTimer = setInterval(runAutoTrainingCapture, intervalSeconds * 1000);
+  guard.autoTraining.uiTimer = setInterval(() => {
+    const elapsed = (Date.now() - guard.autoTraining.startedAt) / 1000;
+    if (elapsed >= guard.autoTraining.durationSeconds) stopAutoTraining("자동수집 완료");
+    else renderAutoTrainingStatus($("#autoTrainingStatus").textContent || "자동수집 중");
+  }, 250);
+}
+
+function stopAutoTraining(message = "자동수집 중지") {
+  const state = guard.autoTraining;
+  if (state.intervalTimer) clearInterval(state.intervalTimer);
+  if (state.uiTimer) clearInterval(state.uiTimer);
+  state.intervalTimer = null;
+  state.uiTimer = null;
+  state.active = false;
+  state.busy = false;
+  if ($("#autoTrainingStart")) $("#autoTrainingStart").disabled = false;
+  if ($("#autoTrainingStop")) $("#autoTrainingStop").disabled = true;
+  if ($("#autoTrainingProgress")) $("#autoTrainingProgress").style.width = "100%";
+  renderAutoTrainingStatus(`${message} · 저장 ${state.saved}건 / 중복 제외 ${state.skipped}건`);
+  refreshTrainingStorageStats();
 }
 
 function confirmViolation(key, event) {
@@ -1898,7 +2102,12 @@ function bindEvents() {
   $("#guardCameraSelect").addEventListener("change", restartGuardCamera);
   $("#guardCallAdminButton").addEventListener("click", initiateGuardCall);
   $("#guardTrainingWorker").addEventListener("change", () => updateTrainingFeedback());
-  $("#saveTrainingSample").addEventListener("click", saveTrainingSample);
+  $("#saveTrainingSample").addEventListener("click", () => saveTrainingSample());
+  $("#autoTrainingStart")?.addEventListener("click", startAutoTraining);
+  $("#autoTrainingStop")?.addEventListener("click", () => stopAutoTraining("사용자가 자동수집을 중지했습니다."));
+  [$("#trainingHatLabel"), $("#trainingGogLabel"), $("#trainingMaskLabel")].forEach((select) => select?.addEventListener("change", () => {
+    if (guard.autoTraining.active) stopAutoTraining("착용 상태가 변경되어 자동수집을 중지했습니다.");
+  }));
   $$('[data-guard-test]').forEach((button) => button.addEventListener("click", () => runGuardTest(button.dataset.guardTest)));
   $("#guardVideo").addEventListener("loadedmetadata", resizeGuardOverlay);
   addEventListener("resize", () => { resizeGuardOverlay(); if (state.currentPage === "zones") drawZoneCanvas(); });
@@ -1936,6 +2145,7 @@ function bindEvents() {
   $$(".speak-sample").forEach((button) => button.addEventListener("click", () => { unlockAudio(); speak(button.dataset.text); }));
 
   addEventListener("beforeunload", () => {
+    if (guard.autoTraining.active) stopAutoTraining("페이지 종료");
     if (guard.active) navigator.sendBeacon?.("/api/agents/offline", new Blob([JSON.stringify({ deviceId: getGuardDeviceId() })], { type: "application/json" }));
   });
   document.addEventListener("visibilitychange", () => {
@@ -1948,6 +2158,7 @@ async function init() {
   renderRuleGroups();
   loadGuardProfile();
   if ($("#trainingSavedCount")) $("#trainingSavedCount").textContent = `${guard.trainingSavedCount}건`;
+  refreshTrainingStorageStats();
   $("#apiOrigin").textContent = location.origin;
   updateClock();
   setInterval(updateClock, 1000);
