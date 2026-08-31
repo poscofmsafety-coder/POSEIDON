@@ -49,6 +49,18 @@ const SCHEMA = [
     byte_length INTEGER NOT NULL DEFAULT 0,
     updated_at TEXT NOT NULL
   )`,
+  `CREATE TABLE IF NOT EXISTS training_samples (
+    id TEXT PRIMARY KEY,
+    device_id TEXT NOT NULL,
+    captured_at TEXT NOT NULL,
+    model_version TEXT NOT NULL DEFAULT '',
+    predicted_json TEXT NOT NULL DEFAULT '{}',
+    labels_json TEXT NOT NULL DEFAULT '{}',
+    snapshot_key TEXT,
+    reviewed INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_training_device ON training_samples(device_id, captured_at DESC)`,
   `CREATE INDEX IF NOT EXISTS idx_media_updated_at ON media(updated_at DESC)`,
   `CREATE INDEX IF NOT EXISTS idx_events_occurred_at ON events(occurred_at DESC)`,
   `CREATE INDEX IF NOT EXISTS idx_events_device_id ON events(device_id)`,
@@ -93,6 +105,7 @@ function defaultConfig() {
       dangerZone: true,
       helmet: true,
       safetyGlasses: true,
+      mask: true,
       harness: false,
       hookConnected: false,
       fall: true,
@@ -545,6 +558,61 @@ async function handleApi(request, env) {
       env.DB.prepare("DELETE FROM devices WHERE id=?").bind(deviceId),
     ]);
     return json({ ok: true });
+  }
+
+
+  if (path === "/api/training/samples" && method === "POST") {
+    const body = await readJson(request);
+    const deviceId = String(body.deviceId || "").trim();
+    if (!deviceId) return error("deviceId가 필요합니다.");
+    const labels = body.labels && typeof body.labels === "object" ? body.labels : {};
+    for (const key of ["helmet", "goggles", "mask"]) {
+      if (!["on", "off", "unknown"].includes(String(labels[key] || ""))) return error(`labels.${key} 값이 필요합니다.`);
+    }
+    const id = randomId("train");
+    let snapshotKey = null;
+    if (body.snapshotBase64) {
+      const bytes = base64ToBytes(String(body.snapshotBase64));
+      if (bytes.byteLength > 700000) return error("학습 이미지는 700KB 이하여야 합니다.", 413);
+      snapshotKey = await putImage(env, `training/${deviceId}/${id}.jpg`, bytes, "image/jpeg");
+    }
+    const capturedAt = String(body.capturedAt || nowIso());
+    await env.DB.prepare(`INSERT INTO training_samples (id,device_id,captured_at,model_version,predicted_json,labels_json,snapshot_key,reviewed,created_at) VALUES (?,?,?,?,?,?,?,0,?)`)
+      .bind(id, deviceId, capturedAt, String(body.modelVersion || ""), JSON.stringify(body.predictions || {}), JSON.stringify(labels), snapshotKey, nowIso()).run();
+    return json({ ok: true, data: { id, snapshotUrl: snapshotKey ? `/media/${encodeURIComponent(snapshotKey)}` : null } }, 201);
+  }
+
+  if (path === "/api/training/samples" && method === "GET") {
+    if (!isAdmin) return error("관리자 권한이 필요합니다.", 403);
+    const limit = Math.min(Math.max(Number(url.searchParams.get("limit") || 200), 1), 1000);
+    const result = await env.DB.prepare(`SELECT id,device_id,captured_at,model_version,predicted_json,labels_json,snapshot_key,reviewed,created_at FROM training_samples ORDER BY captured_at DESC LIMIT ?`).bind(limit).all();
+    const rows = (result.results || []).map((row) => ({
+      id: row.id,
+      deviceId: row.device_id,
+      capturedAt: row.captured_at,
+      modelVersion: row.model_version,
+      predictions: safeJsonParse(row.predicted_json, {}),
+      labels: safeJsonParse(row.labels_json, {}),
+      snapshotUrl: row.snapshot_key ? `/media/${encodeURIComponent(row.snapshot_key)}` : null,
+      reviewed: Boolean(row.reviewed),
+      createdAt: row.created_at,
+    }));
+    return json({ ok: true, data: rows });
+  }
+
+  if (path === "/api/training/export" && method === "GET") {
+    if (!isAdmin) return error("관리자 권한이 필요합니다.", 403);
+    const result = await env.DB.prepare(`SELECT id,device_id,captured_at,model_version,predicted_json,labels_json,snapshot_key FROM training_samples ORDER BY captured_at ASC`).all();
+    const rows = (result.results || []).map((row) => ({
+      id: row.id,
+      device_id: row.device_id,
+      captured_at: row.captured_at,
+      model_version: row.model_version,
+      predictions: safeJsonParse(row.predicted_json, {}),
+      labels: safeJsonParse(row.labels_json, {}),
+      image_url: row.snapshot_key ? `/media/${encodeURIComponent(row.snapshot_key)}` : null,
+    }));
+    return new Response(JSON.stringify(rows, null, 2), { headers: { "content-type": "application/json; charset=utf-8", "content-disposition": `attachment; filename=poseidon-training-${new Date().toISOString().slice(0,10)}.json`, "cache-control": "no-store" } });
   }
 
   if (path === "/api/demo/simulate" && method === "POST") {
