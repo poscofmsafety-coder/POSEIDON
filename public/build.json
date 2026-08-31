@@ -1,9 +1,10 @@
 {
   "project": "POSEIDON",
-  "version": "5.2.1",
+  "version": "5.3.0",
   "theme": "mythology-command",
   "cloudflare": "workers+d1+durable-objects",
   "durableObjects": "exports-sqlite",
-  "learning": "human-in-the-loop-ppe-samples",
-  "zoneControl": "local-and-admin-master-off"
+  "learning": "human-in-the-loop-auto-collection-dedupe-storage-meter",
+  "zoneControl": "local-and-admin-master-off",
+  "trainingStorage": "D1-soft-cap-300MB"
 }
