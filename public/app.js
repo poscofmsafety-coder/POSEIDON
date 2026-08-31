@@ -1,4 +1,4 @@
-const POSEIDON_BUILD = "5.0.0";
+const POSEIDON_BUILD = "5.2.0";
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -123,6 +123,10 @@ const guard = {
   lastEvents: new Map(),
   warningTimer: null,
   modelError: null,
+  latestAssessments: [],
+  latestSourceWidth: 0,
+  latestSourceHeight: 0,
+  trainingSavedCount: Number(localStorage.getItem("poseidon_training_saved") || 0),
 };
 
 const callState = {
@@ -1245,6 +1249,10 @@ function processGuardDetections(message) {
   const detections = message.detections || [];
   const assessments = buildPpeAssessments(detections, message.sourceWidth, message.sourceHeight);
   guard.peopleCount = assessments.length;
+  guard.latestAssessments = assessments;
+  guard.latestSourceWidth = message.sourceWidth || 0;
+  guard.latestSourceHeight = message.sourceHeight || 0;
+  updateTrainingFeedback(assessments);
 
   const rules = guard.config.rules || {};
   const violations = [];
@@ -1381,6 +1389,98 @@ function buildPpeAssessments(detections, sourceWidth, sourceHeight) {
       mask: assess("Mask", "NO-Mask"),
     };
   });
+}
+
+
+function statusTextForTraining(status) {
+  if (!status) return "-";
+  const pct = status.score > 0 ? ` ${Math.round(status.score * 100)}%` : "";
+  return `${status.state}${pct}`;
+}
+
+function updateTrainingFeedback(assessments = guard.latestAssessments || []) {
+  const select = $("#guardTrainingWorker");
+  if (!select) return;
+  const previous = select.value;
+  if (!assessments.length) {
+    select.innerHTML = '<option value="">감지된 작업자 없음</option>';
+    $("#trainingPredictionSummary").textContent = "현재 작업자가 감지되지 않았습니다.";
+    return;
+  }
+  select.innerHTML = assessments.map((worker, index) => `<option value="${index}">작업자 #${worker.id}</option>`).join("");
+  if (previous !== "" && Number(previous) < assessments.length) select.value = previous;
+  const worker = assessments[Number(select.value || 0)];
+  if (!worker) return;
+  $("#trainingPredictionSummary").innerHTML = `<b>현재 AI</b> · HAT <strong>${statusTextForTraining(worker.helmet)}</strong> · GOG <strong>${statusTextForTraining(worker.goggles)}</strong> · MASK <strong>${statusTextForTraining(worker.mask)}</strong>`;
+  $("#trainingSavedCount").textContent = `${guard.trainingSavedCount}건`;
+}
+
+function captureWorkerTrainingCrop(worker, quality = 0.72, maxSize = 640) {
+  const video = $("#guardVideo");
+  if (!video.videoWidth || !worker?.anchor || !guard.latestSourceWidth || !guard.latestSourceHeight) return null;
+  const a = worker.anchor;
+  const sxScale = video.videoWidth / guard.latestSourceWidth;
+  const syScale = video.videoHeight / guard.latestSourceHeight;
+  const padX = a.width * 0.18;
+  const padY = a.height * 0.12;
+  let sx = Math.max(0, (a.x - padX) * sxScale);
+  let sy = Math.max(0, (a.y - padY) * syScale);
+  let sw = Math.min(video.videoWidth - sx, (a.width + padX * 2) * sxScale);
+  let sh = Math.min(video.videoHeight - sy, (a.height + padY * 2) * syScale);
+  if (sw < 32 || sh < 32) return null;
+  const scale = Math.min(1, maxSize / Math.max(sw, sh));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(sw * scale));
+  canvas.height = Math.max(1, Math.round(sh * scale));
+  canvas.getContext("2d").drawImage(video, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL("image/jpeg", quality);
+}
+
+async function saveTrainingSample() {
+  if (!guard.active) return toast("먼저 지킴이를 시작해주세요.");
+  const index = Number($("#guardTrainingWorker").value || 0);
+  const worker = guard.latestAssessments[index];
+  if (!worker) return toast("학습할 작업자를 먼저 감지해주세요.");
+  const labels = {
+    helmet: $("#trainingHatLabel").value,
+    goggles: $("#trainingGogLabel").value,
+    mask: $("#trainingMaskLabel").value,
+  };
+  if (!labels.helmet || !labels.goggles || !labels.mask) return toast("안전모·보안경·마스크 실제 상태를 모두 선택해주세요.", 4500);
+  const snapshotBase64 = captureWorkerTrainingCrop(worker);
+  if (!snapshotBase64) return toast("작업자 이미지를 캡처하지 못했습니다.");
+  const predictions = {
+    helmet: { state: worker.helmet.state, score: worker.helmet.score || 0 },
+    goggles: { state: worker.goggles.state, score: worker.goggles.score || 0 },
+    mask: { state: worker.mask.state, score: worker.mask.score || 0 },
+    anchor: worker.anchor,
+  };
+  const button = $("#saveTrainingSample");
+  button.disabled = true;
+  const old = button.textContent;
+  button.textContent = "저장 중...";
+  try {
+    await api("/api/training/samples", {
+      method: "POST",
+      body: JSON.stringify({
+        deviceId: getGuardDeviceId(),
+        capturedAt: new Date().toISOString(),
+        modelVersion: POSEIDON_BUILD,
+        predictions,
+        labels,
+        snapshotBase64,
+      }),
+    });
+    guard.trainingSavedCount += 1;
+    localStorage.setItem("poseidon_training_saved", String(guard.trainingSavedCount));
+    $("#trainingSavedCount").textContent = `${guard.trainingSavedCount}건`;
+    toast("학습 후보 데이터를 저장했습니다. 검수 후 모델 재학습에 사용합니다.", 5000);
+  } catch (error) {
+    toast(`학습데이터 저장 실패: ${error.message}`, 5500);
+  } finally {
+    button.disabled = false;
+    button.textContent = old;
+  }
 }
 
 function confirmViolation(key, event) {
@@ -1768,6 +1868,8 @@ function bindEvents() {
   $("#guardSaveProfile").addEventListener("click", saveGuardProfile);
   $("#guardCameraSelect").addEventListener("change", restartGuardCamera);
   $("#guardCallAdminButton").addEventListener("click", initiateGuardCall);
+  $("#guardTrainingWorker").addEventListener("change", () => updateTrainingFeedback());
+  $("#saveTrainingSample").addEventListener("click", saveTrainingSample);
   $$('[data-guard-test]').forEach((button) => button.addEventListener("click", () => runGuardTest(button.dataset.guardTest)));
   $("#guardVideo").addEventListener("loadedmetadata", resizeGuardOverlay);
   addEventListener("resize", () => { resizeGuardOverlay(); if (state.currentPage === "zones") drawZoneCanvas(); });
@@ -1816,6 +1918,7 @@ async function init() {
   bindEvents();
   renderRuleGroups();
   loadGuardProfile();
+  if ($("#trainingSavedCount")) $("#trainingSavedCount").textContent = `${guard.trainingSavedCount}건`;
   $("#apiOrigin").textContent = location.origin;
   updateClock();
   setInterval(updateClock, 1000);
