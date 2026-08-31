@@ -98,11 +98,11 @@ function defaultConfig() {
       id: "zone-default",
       name: "출입 제한 구역",
       severity: "high",
-      enabled: true,
+      enabled: false,
       points: [[0.62, 0.28], [0.95, 0.28], [0.95, 0.93], [0.62, 0.93]],
     }],
     rules: {
-      dangerZone: true,
+      dangerZone: false,
       helmet: true,
       safetyGlasses: true,
       mask: true,
