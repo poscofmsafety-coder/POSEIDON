@@ -1,0 +1,14 @@
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: camera=(self), microphone=(self), display-capture=(self)
+  Cross-Origin-Opener-Policy: same-origin-allow-popups
+
+/ppe-worker.js
+  Cache-Control: no-store, max-age=0
+
+/app.js
+  Cache-Control: no-store, max-age=0
+
+/index.html
+  Cache-Control: no-store, max-age=0
