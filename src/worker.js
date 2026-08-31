@@ -561,6 +561,31 @@ async function handleApi(request, env) {
   }
 
 
+  if (path === "/api/training/stats" && method === "GET") {
+    const deviceId = String(url.searchParams.get("deviceId") || "").trim();
+    const queries = [
+      env.DB.prepare("SELECT COUNT(*) AS count FROM training_samples"),
+      env.DB.prepare("SELECT COALESCE(SUM(byte_length),0) AS bytes FROM media WHERE key LIKE 'training/%'"),
+    ];
+    if (deviceId) {
+      queries.push(env.DB.prepare("SELECT COUNT(*) AS count FROM training_samples WHERE device_id=?").bind(deviceId));
+      queries.push(env.DB.prepare("SELECT COALESCE(SUM(byte_length),0) AS bytes FROM media WHERE key LIKE ?").bind(`training/${deviceId}/%`));
+    }
+    const results = await env.DB.batch(queries);
+    const globalSamples = Number(results[0]?.results?.[0]?.count || 0);
+    const globalBytes = Number(results[1]?.results?.[0]?.bytes || 0);
+    const deviceSamples = deviceId ? Number(results[2]?.results?.[0]?.count || 0) : globalSamples;
+    const deviceBytes = deviceId ? Number(results[3]?.results?.[0]?.bytes || 0) : globalBytes;
+    return json({ ok: true, data: {
+      deviceSamples,
+      deviceBytes,
+      globalSamples,
+      globalBytes,
+      softLimitBytes: 300 * 1024 * 1024,
+      freeDatabaseLimitBytes: 500 * 1024 * 1024,
+    }});
+  }
+
   if (path === "/api/training/samples" && method === "POST") {
     const body = await readJson(request);
     const deviceId = String(body.deviceId || "").trim();
