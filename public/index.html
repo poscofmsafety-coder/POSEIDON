@@ -7,7 +7,7 @@
     <meta name="description" content="POSCO Future M 스마트 안전지킴이 - 브라우저 AI 안전 CCTV와 통합 관제" />
     <title>POSEIDON 스마트 안전지킴이 | POSCO Future M</title>
     <link rel="icon" href="/favicon.svg" />
-    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/styles.css?v=5.1.0" />
   </head>
   <body>
     <div class="login-screen" id="loginScreen" hidden>
@@ -15,12 +15,12 @@
       <div class="login-orbit orbit-b"></div>
       <section class="login-card" aria-labelledby="loginTitle">
         <div class="brand brand-login">
-          <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></div>
-          <div><strong>POSCO FUTURE M</strong><small>Smart Safety Guardian</small></div>
+          <div class="brand-mark poseidon-brand-mark" aria-hidden="true"><img src="/poseidon-mark.svg" alt="" /></div>
+          <div><strong>POSEIDON</strong><small>POSCO Future M · AI Safety Guardian</small></div>
         </div>
-        <p class="eyebrow">AI EDGE SAFETY PLATFORM</p>
+        <p class="eyebrow">POSEIDON · AI SAFETY COMMAND</p>
         <h1 id="loginTitle">POSEIDON 스마트 안전지킴이</h1>
-        <p class="login-copy">관리자는 전체 현장을 통합 관제하고, 현장 사용자는 카메라를 켜 안전지킴이를 시작합니다.</p>
+        <p class="login-copy">삼지창처럼 <b>감지 · 판단 · 전파</b>의 세 축으로 위험을 포착합니다. 관리자는 전체 현장을 통합 관제하고 현장 사용자는 브라우저에서 즉시 지킴이를 시작합니다.</p><div class="poseidon-oath"><span>⚡</span><div><b>SAFETY UNDER COMMAND</b><small>위험은 숨지 못하고, 안전은 더 빨리 도착합니다.</small></div></div>
         <div class="role-tabs" role="tablist" aria-label="접속 모드">
           <button class="role-tab active" data-login-role="admin" type="button">관리자 모드</button>
           <button class="role-tab" data-login-role="user" type="button">사용자 모드</button>
@@ -37,11 +37,11 @@
     <div class="app-shell" id="appShell" hidden>
       <aside class="sidebar" id="sidebar">
         <div class="brand">
-          <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></div>
-          <div><strong>POSCO FUTURE M</strong><small>POSEIDON · 스마트 안전지킴이</small></div>
+          <div class="brand-mark poseidon-brand-mark" aria-hidden="true"><img src="/poseidon-mark.svg" alt="" /></div>
+          <div><strong>POSEIDON</strong><small>POSCO Future M · Safety Commander</small></div>
         </div>
 
-        <div class="product-title"><span class="pulse-dot"></span>AI 안전 통합관제</div>
+        <div class="product-title"><img src="/poseidon-mark.svg" alt="" /> <span><b>POSEIDON COMMAND</b><small>AI 안전 통합관제</small></span></div>
 
         <nav class="nav-list admin-only" aria-label="관리자 메뉴">
           <button class="nav-item active" data-page="overview" type="button"><span>⌂</span>통합 대시보드</button>
@@ -71,7 +71,7 @@
       <main class="main-area">
         <header class="topbar">
           <button class="mobile-menu" id="mobileMenu" aria-label="메뉴 열기" type="button">☰</button>
-          <div class="topbar-title"><p class="eyebrow">POSCO FUTURE M · SMART FACTORY SAFETY</p><h1 id="pageTitle">통합 대시보드</h1></div>
+          <div class="topbar-title"><p class="eyebrow">POSEIDON SAFETY COMMAND · POSCO FUTURE M</p><h1 id="pageTitle">통합 대시보드</h1></div>
           <div class="topbar-actions">
             <button class="top-action admin-only" id="qrOpenButton" type="button"><span>▦</span><b>현장 QR</b></button>
             <button class="top-action user-only" id="guardTopButton" type="button"><span class="guardian-toggle-dot"></span><b>지킴이 시작</b></button>
@@ -85,12 +85,12 @@
         <section class="page active admin-only" id="page-overview">
           <div class="hero-panel">
             <div>
-              <p class="eyebrow">BATTERY MATERIALS · SAFETY INTELLIGENCE</p>
-              <h2>현장의 위험 신호를<br /><em>사고 전에</em> 발견합니다.</h2>
-              <p>브라우저 카메라를 AI 안전 CCTV로 전환하고 여러 현장을 한 화면에서 실시간으로 관제합니다.</p>
+              <p class="eyebrow">TRIDENT SAFETY INTELLIGENCE · DETECT · JUDGE · ALERT</p>
+              <h2>안전을 다스리는 삼지창,<br /><em>POSEIDON</em>이 위험을 포착합니다.</h2>
+              <p>감지 · 판단 · 전파의 세 갈래 안전 지능으로 브라우저 카메라를 AI 안전 CCTV로 전환하고 여러 현장을 한 화면에서 실시간 관제합니다.</p>
               <div class="hero-actions"><button class="primary-button" data-goto="live" type="button">실시간 관제 열기</button><button class="secondary-button" id="heroQrButton" type="button">현장 QR 만들기</button></div>
             </div>
-            <div class="battery-visual" aria-hidden="true"><div class="battery-cell cell-a"></div><div class="battery-cell cell-b"></div><div class="battery-cell cell-c"></div><div class="energy-line line-a"></div><div class="energy-line line-b"></div><div class="core-ring"><span>AI</span></div></div>
+            <figure class="poseidon-guardian-card" aria-label="POSEIDON AI Safety Guardian"><img src="/poseidon-concept.png" alt="삼지창으로 위험 신호를 감지하는 POSEIDON AI Safety Guardian 콘셉트" /><figcaption><img src="/poseidon-mark.svg" alt="" /><span><b>POSEIDON</b><small>Safety Guardian AI</small></span></figcaption></figure>
           </div>
           <div class="kpi-grid" id="kpiGrid"></div>
           <div class="dashboard-grid">

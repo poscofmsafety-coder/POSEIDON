@@ -411,3 +411,80 @@ body.loading::after { content: ""; position: fixed; z-index: 250; left: 0; right
   body { color: #111; background: #fff; }
   .panel { color: #111; background: #fff; box-shadow: none; border-color: #ddd; }
 }
+
+/* =========================================================
+   POSEIDON v5.1 mythology command theme
+   ========================================================= */
+:root {
+  --poseidon-deep: #020b18;
+  --poseidon-navy: #061b35;
+  --poseidon-blue: #078de8;
+  --poseidon-cyan: #45efff;
+  --poseidon-gold: #e7bd5b;
+  --poseidon-ice: #dffaff;
+  --cyan: var(--poseidon-cyan);
+  --blue: var(--poseidon-blue);
+  --line-strong: rgba(69,239,255,.38);
+}
+body {
+  background:
+    radial-gradient(circle at 77% 12%, rgba(7,141,232,.18), transparent 28%),
+    radial-gradient(circle at 15% 90%, rgba(30,101,163,.14), transparent 34%),
+    linear-gradient(145deg, #020914 0%, #04101f 46%, #061a2c 100%);
+}
+body::before {
+  content:""; position:fixed; inset:0; pointer-events:none; z-index:-1; opacity:.17;
+  background-image:
+    radial-gradient(circle at 18% 20%, rgba(69,239,255,.9) 0 1px, transparent 2px),
+    linear-gradient(115deg, transparent 0 49.6%, rgba(69,239,255,.11) 50%, transparent 50.4%);
+  background-size: 160px 160px, 220px 220px;
+}
+.poseidon-brand-mark { width:40px; height:40px; display:grid; place-items:center; filter:drop-shadow(0 0 12px rgba(69,239,255,.38)); }
+.poseidon-brand-mark img { width:100%; height:100%; object-fit:contain; }
+.brand strong { color:#f8fcff; font-size:18px; letter-spacing:.14em; }
+.brand small { color:#88b7c9; }
+.product-title { align-items:center; gap:12px; border-color:rgba(69,239,255,.32); background:linear-gradient(90deg,rgba(4,83,126,.3),rgba(7,24,43,.36)); }
+.product-title > img { width:31px; height:31px; filter:drop-shadow(0 0 10px rgba(69,239,255,.45)); }
+.product-title > span { display:grid; gap:2px; }
+.product-title small { color:#79a9bb; font-size:10px; letter-spacing:.08em; }
+.sidebar { background:linear-gradient(180deg,rgba(2,11,24,.985),rgba(4,20,36,.97)); box-shadow:20px 0 60px rgba(0,0,0,.2); }
+.nav-item.active { border-left-color:var(--poseidon-cyan); background:linear-gradient(90deg,rgba(5,119,181,.28),rgba(10,33,56,.26)); }
+.topbar { background:rgba(2,11,24,.9); box-shadow:0 12px 38px rgba(0,0,0,.16); }
+.eyebrow { color:#79c8dc; }
+.primary-button { color:#02101b; background:linear-gradient(135deg,#4cf2ff,#18a8f4 60%,#e8c15d); box-shadow:0 10px 35px rgba(37,183,241,.22); }
+.panel, .kpi-card { background:linear-gradient(150deg,rgba(7,25,42,.92),rgba(4,18,31,.88)); border-color:rgba(72,177,214,.2); }
+.login-screen {
+  background:
+    linear-gradient(90deg,rgba(1,8,18,.96) 0%,rgba(1,9,20,.84) 48%,rgba(2,14,28,.72) 100%),
+    url('/poseidon-concept.png') center/cover no-repeat;
+}
+.login-card { margin-left:min(34vw,440px); border-color:rgba(69,239,255,.38); background:linear-gradient(155deg,rgba(3,14,27,.95),rgba(5,28,48,.9)); box-shadow:0 35px 120px rgba(0,0,0,.58),0 0 70px rgba(15,151,225,.12); }
+.poseidon-oath { display:flex; align-items:center; gap:12px; margin:0 0 24px; padding:13px 14px; border:1px solid rgba(231,189,91,.26); border-radius:13px; background:rgba(231,189,91,.055); }
+.poseidon-oath > span { color:var(--poseidon-gold); font-size:24px; }
+.poseidon-oath b,.poseidon-oath small { display:block; }
+.poseidon-oath b { color:#f4d98f; font-size:11px; letter-spacing:.14em; }
+.poseidon-oath small { margin-top:4px; color:#9eb8c4; font-size:11px; }
+.hero-panel {
+  min-height:360px; grid-template-columns:minmax(0,1.06fr) minmax(360px,.94fr);
+  background:
+    radial-gradient(circle at 78% 35%,rgba(5,154,231,.19),transparent 32%),
+    linear-gradient(120deg,rgba(3,17,31,.98),rgba(4,27,47,.92) 55%,rgba(8,48,76,.82));
+  border-color:rgba(69,239,255,.27);
+}
+.hero-panel::after { content:""; position:absolute; inset:auto 0 0 0; height:3px; background:linear-gradient(90deg,transparent,var(--poseidon-cyan),var(--poseidon-gold),transparent); opacity:.55; }
+.hero-panel h2 em { background:linear-gradient(90deg,#56f1ff,#58b9ff,#f0cf76); -webkit-background-clip:text; background-clip:text; color:transparent; }
+.poseidon-guardian-card { position:relative; height:300px; margin:0; overflow:hidden; border:1px solid rgba(69,239,255,.28); border-radius:22px; box-shadow:0 25px 60px rgba(0,0,0,.38),0 0 45px rgba(23,156,232,.12); }
+.poseidon-guardian-card > img { width:100%; height:100%; object-fit:cover; object-position:12% 45%; filter:saturate(.9) contrast(1.04) brightness(.78); }
+.poseidon-guardian-card::before { content:""; position:absolute; inset:0; z-index:1; background:linear-gradient(90deg,rgba(3,15,27,.2),rgba(3,15,27,.02) 55%,rgba(3,15,27,.48)); pointer-events:none; }
+.poseidon-guardian-card figcaption { position:absolute; z-index:2; left:18px; right:18px; bottom:16px; display:flex; align-items:center; gap:10px; padding:11px 13px; border:1px solid rgba(69,239,255,.28); border-radius:14px; background:rgba(1,12,24,.72); backdrop-filter:blur(12px); }
+.poseidon-guardian-card figcaption img { width:34px; height:34px; }
+.poseidon-guardian-card figcaption b,.poseidon-guardian-card figcaption small { display:block; }
+.poseidon-guardian-card figcaption b { letter-spacing:.15em; color:#f8fcff; }
+.poseidon-guardian-card figcaption small { margin-top:2px; color:#71cee3; font-size:10px; }
+.system-chip { border-color:rgba(69,239,255,.25); background:rgba(4,43,63,.64); }
+.ai-badge { color:var(--poseidon-gold); border-color:rgba(231,189,91,.28); }
+@media (max-width: 900px) {
+  .login-card { margin-left:0; }
+  .hero-panel { grid-template-columns:1fr; }
+  .poseidon-guardian-card { height:260px; }
+}

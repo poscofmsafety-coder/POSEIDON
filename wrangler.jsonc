@@ -2,58 +2,38 @@
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "poseidon",
   "main": "src/worker.js",
-  "compatibility_date": "2026-08-27",
+  "compatibility_date": "2026-08-31",
   "assets": {
     "directory": "./public",
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
-    "run_worker_first": [
-      "/api/*",
-      "/media/*",
-      "/models/*"
-    ]
+    "run_worker_first": ["/api/*", "/media/*", "/models/*"]
   },
   "d1_databases": [
-    {
-      "binding": "DB"
-    }
+    { "binding": "DB" }
   ],
   "durable_objects": {
     "bindings": [
-      {
-        "name": "SIGNALING",
-        "class_name": "SignalingRoom"
-      }
+      { "name": "SIGNALING", "class_name": "SignalingRoom" }
     ]
   },
-  "migrations": [
-    {
-      "tag": "v1-realtime-signaling",
-      "new_sqlite_classes": [
-        "SignalingRoom"
-      ]
+  "exports": {
+    "SignalingRoom": {
+      "type": "durable-object",
+      "storage": "sqlite"
     }
-  ],
+  },
   "vars": {
-    "APP_NAME": "POSEIDON 스마트 안전지킴이",
+    "APP_NAME": "POSEIDON AI Safety Guardian",
     "COMPANY_NAME": "POSCO Future M",
     "ADMIN_PIN": "2468",
     "USER_PIN": "1357",
     "SESSION_SECRET": "CHANGE_THIS_TO_A_LONG_RANDOM_SECRET_BEFORE_PRODUCTION",
     "PPE_MODEL_URL": "https://huggingface.co/ayushgupta7777/safetyvision-yolov8/resolve/main/v2/best_640.onnx",
     "TURN_ICE_SERVERS": "[]",
-    "AI_PROVIDER": "workers-ai,openai",
-    "WORKERS_AI_MODEL": "@cf/qwen/qwen3.8-27b",
-    "OPENAI_MODEL": "gpt-5-mini",
     "ADMIN_EMAIL": "",
     "EMAIL_FROM": "",
     "NOTIFY_WEBHOOK_URL": "",
     "TBM_INBOUND_TOKEN": ""
-  },
-  "observability": {
-    "enabled": true
-  },
-  "ai": {
-    "binding": "AI"
   }
 }
