@@ -86,7 +86,7 @@
           <div class="hero-panel">
             <div>
               <p class="eyebrow">TRIDENT SAFETY INTELLIGENCE · DETECT · JUDGE · ALERT</p>
-              <h2>안전을 다스리는 삼지창,<br /><em>POSEIDON</em>이 위험을 포착합니다.</h2>
+              <h2>안전을 다스리는 삼지창,<br /><em>포세이돈</em>이 위험을 포착합니다.</h2>
               <p>감지 · 판단 · 전파의 세 갈래 안전 지능으로 브라우저 카메라를 AI 안전 CCTV로 전환하고 여러 현장을 한 화면에서 실시간 관제합니다.</p>
               <div class="hero-actions"><button class="primary-button" data-goto="live" type="button">실시간 관제 열기</button><button class="secondary-button" id="heroQrButton" type="button">현장 QR 만들기</button></div>
             </div>
@@ -151,6 +151,19 @@
                 </div>
                 <button class="secondary-button full-button" id="guardSaveProfile" type="button">장치 정보 저장</button>
                 <p class="device-id-note">장치 ID <code id="guardDeviceId"></code></p>
+              </section>
+              <section class="panel training-feedback-panel" id="trainingFeedbackPanel">
+                <div class="panel-header"><div><p class="eyebrow">HUMAN-IN-THE-LOOP LEARNING</p><h3>AI 학습 피드백</h3></div><span class="learning-badge">DATA</span></div>
+                <p class="training-note">AI가 <b>CHECK</b>하거나 틀린 장면의 실제 상태를 사람이 확인해 저장합니다. 저장된 데이터는 즉시 자동학습되는 것이 아니라, 검수 후 POSEIDON 전용 모델 재학습에 사용합니다.</p>
+                <label>대상 작업자<select id="guardTrainingWorker"><option value="">감지된 작업자 없음</option></select></label>
+                <div class="training-ai-state" id="trainingPredictionSummary">카메라를 시작하면 현재 AI 판정이 표시됩니다.</div>
+                <div class="training-label-grid">
+                  <label>실제 안전모<select id="trainingHatLabel"><option value="">선택</option><option value="on">착용</option><option value="off">미착용</option><option value="unknown">판정불가</option></select></label>
+                  <label>실제 보안경<select id="trainingGogLabel"><option value="">선택</option><option value="on">착용</option><option value="off">미착용</option><option value="unknown">판정불가</option></select></label>
+                  <label>실제 마스크<select id="trainingMaskLabel"><option value="">선택</option><option value="on">착용</option><option value="off">미착용</option><option value="unknown">판정불가</option></select></label>
+                </div>
+                <button class="primary-button full-button" id="saveTrainingSample" type="button">현재 작업자 장면 학습데이터로 저장</button>
+                <div class="training-save-status"><span>이번 브라우저 저장</span><b id="trainingSavedCount">0건</b></div>
               </section>
               <section class="panel radio-panel">
                 <div class="panel-header"><div><p class="eyebrow">TWO-WAY RADIO</p><h3>관제센터 무전</h3></div><span class="radio-indicator" id="guardRadioIndicator">대기</span></div>
@@ -242,6 +255,6 @@
     <div class="sidebar-scrim" id="sidebarScrim"></div>
 
     <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js" defer></script>
-    <script type="module" src="/app.js?v=4.5.0"></script>
+    <script type="module" src="/app.js?v=5.2.0"></script>
   </body>
 </html>
