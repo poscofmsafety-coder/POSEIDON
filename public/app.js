@@ -1,4 +1,4 @@
-const POSEIDON_BUILD = "5.3.0";
+const POSEIDON_BUILD = "6.0.0";
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -111,6 +111,13 @@ const guard = {
   modelReady: false,
   inferenceBusy: false,
   inferenceTimer: null,
+  personWorker: null,
+  personModelReady: false,
+  personInferenceBusy: false,
+  personInferenceTimer: null,
+  personDetections: [],
+  personInferenceFps: 0,
+  mobileInferenceCanvas: null,
   heartbeatTimer: null,
   configTimer: null,
   previewTimer: null,
@@ -294,6 +301,7 @@ function goToPage(page) {
     if (page === "zones") prepareZoneEditor();
     if (["ppe", "behavior", "environment", "equipment"].includes(page)) loadRuleEditor(page);
     if (page === "reports") renderReports();
+    if (page === "events") loadEventRetentionSettings();
   }
 }
 
@@ -468,8 +476,9 @@ function renderEventTable() {
   const categoryFilter = $("#eventCategoryFilter")?.value || "";
   const severityFilter = $("#eventSeverityFilter")?.value || "";
   const items = state.events.filter((event) => (!deviceFilter || event.deviceId === deviceFilter) && (!categoryFilter || event.category === categoryFilter) && (!severityFilter || event.severity === severityFilter));
-  body.innerHTML = items.map((event) => `<tr><td>${formatDate(event.occurredAt)}</td><td>${escapeHtml(event.deviceName)}</td><td>${escapeHtml(event.category)}</td><td><span class="severity-pill ${escapeHtml(event.severity)}">${severityLabel(event.severity)}</span></td><td>${event.snapshotUrl ? `<a href="${escapeHtml(event.snapshotUrl)}" target="_blank" rel="noopener">${escapeHtml(event.message)}</a>` : escapeHtml(event.message)}</td><td>${escapeHtml(event.status)}</td><td>${event.acknowledged ? "완료" : `<button class="table-action" data-event-ack="${escapeHtml(event.id)}">확인 완료</button>`}</td></tr>`).join("") || `<tr><td colspan="7">조회된 이벤트가 없습니다.</td></tr>`;
+  body.innerHTML = items.map((event) => `<tr><td>${formatDate(event.occurredAt)}</td><td>${escapeHtml(event.deviceName)}</td><td>${escapeHtml(event.category)}</td><td><span class="severity-pill ${escapeHtml(event.severity)}">${severityLabel(event.severity)}</span></td><td>${event.snapshotUrl ? `<a href="${escapeHtml(event.snapshotUrl)}" target="_blank" rel="noopener">${escapeHtml(event.message)}</a>` : escapeHtml(event.message)}</td><td>${escapeHtml(event.status)}</td><td><div class="event-actions">${event.acknowledged ? "<span>완료</span>" : `<button class="table-action" data-event-ack="${escapeHtml(event.id)}">확인 완료</button>`}<button class="table-action danger-action" data-event-delete="${escapeHtml(event.id)}">삭제</button></div></td></tr>`).join("") || `<tr><td colspan="7">조회된 이벤트가 없습니다.</td></tr>`;
   $$('[data-event-ack]', body).forEach((button) => button.addEventListener("click", () => acknowledgeEvent(button.dataset.eventAck)));
+  $$('[data-event-delete]', body).forEach((button) => button.addEventListener("click", () => deleteEvent(button.dataset.eventDelete)));
 }
 
 function renderCategoryChart() {
@@ -524,6 +533,63 @@ async function simulateEvent() {
     await api("/api/demo/simulate", { method: "POST", body: "{}" });
     toast("시연용 위험 이벤트를 생성했습니다.");
     await loadDashboard(true);
+  } catch (error) { toast(error.message); }
+}
+
+async function loadEventRetentionSettings() {
+  if (state.session?.role !== "admin" || !$("#eventRetentionDays")) return;
+  try {
+    const data = await api("/api/events/settings");
+    state.eventRetention = data;
+    $("#eventRetentionEnabled").checked = data.enabled !== false;
+    $("#eventRetentionDays").value = String(data.days || 30);
+    $("#eventRetentionStats").textContent = `현재 ${data.eventCount || 0}건 · 스냅숏 ${formatTrainingBytes(data.snapshotBytes || 0)} · 매일 자동 정리`;
+  } catch (error) {
+    $("#eventRetentionStats").textContent = `보관설정 조회 실패: ${error.message}`;
+  }
+}
+
+async function saveEventRetentionSettings() {
+  try {
+    const days = Math.min(365, Math.max(1, Number($("#eventRetentionDays").value || 30)));
+    const enabled = $("#eventRetentionEnabled").checked;
+    const data = await api("/api/events/settings", { method: "PUT", body: JSON.stringify({ days, enabled }) });
+    toast(`이벤트 자동정리: ${enabled ? `${days}일 보관` : "사용 안 함"}`);
+    state.eventRetention = data;
+    await loadEventRetentionSettings();
+  } catch (error) { toast(error.message); }
+}
+
+async function cleanupExpiredEvents() {
+  const days = Math.min(365, Math.max(1, Number($("#eventRetentionDays").value || 30)));
+  if (!confirm(`${days}일이 지난 이벤트와 스냅숏을 지금 삭제할까요?`)) return;
+  try {
+    const result = await api("/api/events/cleanup", { method: "POST", body: JSON.stringify({ days }) });
+    toast(`${result.deleted || 0}건을 정리했습니다.`);
+    await loadDashboard(true);
+    await loadEventRetentionSettings();
+  } catch (error) { toast(error.message); }
+}
+
+async function deleteEvent(id) {
+  if (!confirm("이 이벤트와 연결된 스냅숏을 삭제할까요?")) return;
+  try {
+    await api(`/api/events/${encodeURIComponent(id)}`, { method: "DELETE" });
+    state.events = state.events.filter((event) => event.id !== id);
+    renderEvents();
+    await loadEventRetentionSettings();
+    toast("이벤트를 삭제했습니다.");
+  } catch (error) { toast(error.message); }
+}
+
+async function deleteAllEvents() {
+  if (!confirm("이벤트 센터의 모든 이벤트와 이벤트 스냅숏을 삭제합니다. 학습데이터는 삭제되지 않습니다. 계속할까요?")) return;
+  if (!confirm("정말 전체 삭제할까요? 이 작업은 되돌릴 수 없습니다.")) return;
+  try {
+    const result = await api("/api/events", { method: "DELETE" });
+    toast(`${result.deleted || 0}건을 삭제했습니다.`);
+    await loadDashboard(true);
+    await loadEventRetentionSettings();
   } catch (error) { toast(error.message); }
 }
 
@@ -1040,10 +1106,99 @@ function saveGuardProfile() {
   if (guard.active) registerGuard();
 }
 
-function guardConstraints() {
-  const cameraId = $("#guardCameraSelect").value || JSON.parse(localStorage.getItem("ssg-guard-profile") || "{}").cameraId;
-  const video = cameraId ? { deviceId: { exact: cameraId }, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 24, max: 30 } } : { facingMode: isMobile() ? { ideal: "environment" } : "user", width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 24, max: 30 } };
-  return { video, audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } };
+function guardVideoConstraintCandidates() {
+  const saved = JSON.parse(localStorage.getItem("ssg-guard-profile") || "{}");
+  const selected = $("#guardCameraSelect").value || saved.cameraId || "";
+  const mobile = isMobile();
+  const size = mobile
+    ? { width: { ideal: 960, max: 1280 }, height: { ideal: 540, max: 720 }, frameRate: { ideal: 18, max: 24 } }
+    : { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 24, max: 30 } };
+  const candidates = [];
+  if (selected) candidates.push({ deviceId: { exact: selected }, ...size });
+  if (mobile) candidates.push({ facingMode: { ideal: "environment" }, ...size });
+  candidates.push(size);
+  candidates.push(true);
+  return candidates;
+}
+
+async function requestGuardCameraStream() {
+  let lastError = null;
+  for (const video of guardVideoConstraintCandidates()) {
+    try {
+      return { stream: await navigator.mediaDevices.getUserMedia({ video, audio: false }), fallback: Boolean(lastError) };
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError || new Error("카메라를 열 수 없습니다.");
+}
+
+async function attachOptionalGuardMicrophone(stream) {
+  try {
+    const mic = await navigator.mediaDevices.getUserMedia({
+      video: false,
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+    });
+    const track = mic.getAudioTracks()[0];
+    if (track) {
+      track.enabled = false;
+      stream.addTrack(track);
+    }
+    return true;
+  } catch (error) {
+    console.info("Microphone permission deferred:", error?.message || error);
+    return false;
+  }
+}
+
+function inferenceProfile() {
+  const mobile = isMobile();
+  const cores = Number(navigator.hardwareConcurrency || 4);
+  const memory = Number(navigator.deviceMemory || 4);
+  const constrained = mobile && (cores <= 4 || memory <= 4);
+  return {
+    personDelay: constrained ? 1700 : mobile ? 1200 : 700,
+    ppeDelay: constrained ? 2800 : mobile ? 2000 : Math.max(900, guard.config.detection?.intervalMs || 1000),
+    transport: mobile ? "rgba" : "bitmap",
+  };
+}
+
+function buildRgbaInferenceFrame(video, inputSize = 640) {
+  if (!video.videoWidth || !video.videoHeight) return null;
+  if (!guard.mobileInferenceCanvas) guard.mobileInferenceCanvas = document.createElement("canvas");
+  const canvas = guard.mobileInferenceCanvas;
+  canvas.width = inputSize;
+  canvas.height = inputSize;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  const sourceWidth = video.videoWidth;
+  const sourceHeight = video.videoHeight;
+  const scale = Math.min(inputSize / sourceWidth, inputSize / sourceHeight);
+  const drawWidth = Math.round(sourceWidth * scale);
+  const drawHeight = Math.round(sourceHeight * scale);
+  const padX = Math.floor((inputSize - drawWidth) / 2);
+  const padY = Math.floor((inputSize - drawHeight) / 2);
+  ctx.fillStyle = "rgb(114,114,114)";
+  ctx.fillRect(0, 0, inputSize, inputSize);
+  ctx.drawImage(video, padX, padY, drawWidth, drawHeight);
+  const image = ctx.getImageData(0, 0, inputSize, inputSize);
+  return {
+    rgba: image.data.buffer,
+    meta: { sourceWidth, sourceHeight, scale, padX, padY },
+  };
+}
+
+async function postInferenceFrame(targetWorker, requestId, threshold) {
+  const video = $("#guardVideo");
+  if (video.readyState < 2 || !video.videoWidth) throw new Error("카메라 프레임 준비 중");
+  const profile = inferenceProfile();
+  if (profile.transport === "rgba" || typeof createImageBitmap !== "function") {
+    const frame = buildRgbaInferenceFrame(video, 640);
+    if (!frame) throw new Error("모바일 추론 프레임 생성 실패");
+    targetWorker.postMessage({ type: "infer-rgba", requestId, rgba: frame.rgba, meta: frame.meta, threshold }, [frame.rgba]);
+    return;
+  }
+  const bitmap = await createImageBitmap(video);
+  targetWorker.postMessage({ type: "infer", requestId, bitmap, threshold }, [bitmap]);
 }
 
 async function startGuard() {
@@ -1053,9 +1208,12 @@ async function startGuard() {
   updateGuardUi();
   try {
     unlockAudio();
-    const stream = await navigator.mediaDevices.getUserMedia(guardConstraints());
+    const camera = await requestGuardCameraStream();
+    const stream = camera.stream;
     guard.stream = stream;
-    stream.getAudioTracks().forEach((track) => { track.enabled = false; });
+    const microphoneReady = await attachOptionalGuardMicrophone(stream);
+    if (camera.fallback) toast("저장된 카메라 설정 대신 사용 가능한 카메라로 자동 전환했습니다.");
+    if (!microphoneReady) toast("카메라는 시작했습니다. 무전 사용 시 마이크 권한을 다시 요청합니다.", 4500);
     const video = $("#guardVideo");
     video.srcObject = stream;
     await video.play();
@@ -1089,7 +1247,15 @@ async function stopGuard() {
   for (const peerId of [...realtime.guardVideoPeers.keys()]) closeGuardVideoPeer(peerId);
   guard.worker?.terminate();
   guard.worker = null;
+  guard.personWorker?.terminate();
+  guard.personWorker = null;
   guard.modelReady = false;
+  guard.personModelReady = false;
+  guard.inferenceBusy = false;
+  guard.personInferenceBusy = false;
+  guard.inferenceFps = 0;
+  guard.personInferenceFps = 0;
+  guard.personDetections = [];
   guard.stream?.getTracks().forEach((track) => track.stop());
   guard.stream = null;
   $("#guardVideo").srcObject = null;
@@ -1116,9 +1282,11 @@ function updateGuardUi() {
   $("#guardStatusPill").classList.toggle("online", active);
   $("#guardStatusPill b").textContent = active ? "관제 연결" : starting ? "시작 중" : "대기 중";
   $("#guardConnectionMetric").textContent = active ? "ONLINE" : "OFFLINE";
-  $("#guardModelMetric").textContent = guard.modelReady ? "PPE ON · v5.2.1" : guard.modelError ? "모델 오류" : active ? "준비 중" : "대기";
+  const personLabel = guard.personModelReady ? "YOLO11n" : "PERSON 준비";
+  const ppeLabel = guard.modelReady ? "PPE" : guard.modelError ? "PPE 오류" : "PPE 준비";
+  $("#guardModelMetric").textContent = active ? `${personLabel} + ${ppeLabel}` : "대기";
   $("#guardPeopleMetric").textContent = `${guard.peopleCount}명`;
-  $("#guardFpsMetric").textContent = `${guard.inferenceFps.toFixed(1)} FPS`;
+  $("#guardFpsMetric").textContent = active ? `PERSON ${guard.personInferenceFps.toFixed(1)} · PPE ${guard.inferenceFps.toFixed(1)}` : "0.0 FPS";
   updateGuardViewerCount();
 }
 
@@ -1145,7 +1313,7 @@ async function registerGuard() {
     area: $("#guardArea").value.trim() || "미지정 구역",
   };
   localStorage.setItem("ssg-guard-profile", JSON.stringify({ ...profile, cameraId: $("#guardCameraSelect").value, voiceEnabled: $("#guardVoiceEnabled").checked, zoneEnabled: $("#guardZoneEnabled").checked }));
-  await api("/api/agents/register", { method: "POST", body: JSON.stringify({ deviceId: getGuardDeviceId(), ...profile, cameraLabel: $("#guardCameraSelect").selectedOptions[0]?.textContent || "브라우저 카메라", agentVersion: "browser-webrtc-2.0", config: guard.config }) });
+  await api("/api/agents/register", { method: "POST", body: JSON.stringify({ deviceId: getGuardDeviceId(), ...profile, cameraLabel: $("#guardCameraSelect").selectedOptions[0]?.textContent || "브라우저 카메라", agentVersion: "browser-yolo11n-3.0", config: guard.config }) });
 }
 
 async function fetchGuardConfig() {
@@ -1165,46 +1333,64 @@ function startGuardTimers() {
 }
 
 function stopGuardTimers() {
-  ["heartbeatTimer", "configTimer", "previewTimer", "inferenceTimer"].forEach((key) => { clearInterval(guard[key]); clearTimeout(guard[key]); guard[key] = null; });
+  ["heartbeatTimer", "configTimer", "previewTimer", "inferenceTimer", "personInferenceTimer"].forEach((key) => { clearInterval(guard[key]); clearTimeout(guard[key]); guard[key] = null; });
 }
 
 async function sendGuardHeartbeat() {
   if (!guard.active) return;
   try {
-    await api("/api/agents/heartbeat", { method: "POST", body: JSON.stringify({ deviceId: getGuardDeviceId(), fps: guard.inferenceFps, cpu: 0, memory: 0, peopleCount: guard.peopleCount, currentRisk: guard.currentRisk, agentVersion: "browser-webrtc-2.0" }) });
+    await api("/api/agents/heartbeat", { method: "POST", body: JSON.stringify({ deviceId: getGuardDeviceId(), fps: guard.inferenceFps, cpu: 0, memory: 0, peopleCount: guard.peopleCount, currentRisk: guard.currentRisk, agentVersion: "browser-yolo11n-3.0" }) });
   } catch { /* reconnect will retry */ }
 }
 
 function startGuardWorker() {
   guard.worker?.terminate();
-  guard.worker = new Worker("/ppe-worker.js?v=5.2.1");
+  guard.personWorker?.terminate();
+  guard.worker = new Worker(`/ppe-worker.js?v=${POSEIDON_BUILD}`);
+  guard.personWorker = new Worker(`/person-worker.js?v=${POSEIDON_BUILD}`);
   guard.modelReady = false;
+  guard.personModelReady = false;
+  guard.inferenceBusy = false;
+  guard.personInferenceBusy = false;
   guard.modelError = null;
   $("#ppeLoading").hidden = false;
+  $("#ppeLoadingText").textContent = "YOLO11n 사람 감지 + 보호구 AI 준비 중";
   guard.worker.onmessage = (event) => handlePpeWorkerMessage(event.data || {});
   guard.worker.onerror = (event) => {
     guard.modelError = event.message || "보호구 AI 오류";
     $("#ppeLoadingText").textContent = guard.modelError;
     updateGuardUi();
   };
+  guard.personWorker.onmessage = (event) => handlePersonWorkerMessage(event.data || {});
+  guard.personWorker.onerror = (event) => {
+    console.warn("YOLO11n person worker error", event.message);
+    $("#ppeLoadingText").textContent = "사람 감지 AI 오류 · 보호구 AI는 계속 사용합니다.";
+  };
+  guard.personWorker.postMessage({ type: "load" });
   guard.worker.postMessage({ type: "load" });
+}
+
+function maybeHideAiLoader() {
+  if (guard.modelReady && guard.personModelReady) {
+    $("#ppeLoading").style.setProperty("--model-progress", "100%");
+    $("#ppeLoadingText").textContent = "YOLO11n + 보호구 AI 준비 완료";
+    $("#ppeLoadingProgress").textContent = "100%";
+    setTimeout(() => { $("#ppeLoading").hidden = true; }, 900);
+  }
 }
 
 function handlePpeWorkerMessage(message) {
   if (message.type === "model-status") {
-    $("#ppeLoadingText").textContent = message.message;
+    $("#ppeLoadingText").textContent = `PPE · ${message.message}`;
   } else if (message.type === "model-progress") {
     const percent = message.percent || 0;
-    $("#ppeLoading").style.setProperty("--model-progress", `${percent}%`);
-    $("#ppeLoadingProgress").textContent = message.total ? `${percent}%` : `${Math.round((message.loaded || 0) / 1048576)}MB`;
+    $("#ppeLoading").style.setProperty("--model-progress", `${Math.min(95, percent)}%`);
+    $("#ppeLoadingProgress").textContent = message.total ? `PPE ${percent}%` : `${Math.round((message.loaded || 0) / 1048576)}MB`;
   } else if (message.type === "model-ready") {
     guard.modelReady = true;
-    $("#ppeLoading").style.setProperty("--model-progress", "100%");
-    $("#ppeLoadingText").textContent = "보호구 AI 준비 완료";
-    $("#ppeLoadingProgress").textContent = "100%";
-    setTimeout(() => { $("#ppeLoading").hidden = true; }, 900);
     updateGuardUi();
-    scheduleGuardInference(100);
+    scheduleGuardInference(150);
+    maybeHideAiLoader();
   } else if (message.type === "model-error") {
     guard.modelError = message.message;
     $("#ppeLoadingText").textContent = "보호구 AI를 불러오지 못했습니다.";
@@ -1216,11 +1402,44 @@ function handlePpeWorkerMessage(message) {
     guard.detections = message.detections || [];
     guard.inferenceFps = message.inferenceMs ? 1000 / message.inferenceMs : 0;
     processGuardDetections(message);
-    scheduleGuardInference(isMobile() ? 1500 : Math.max(750, guard.config.detection?.intervalMs || 1000));
+    scheduleGuardInference(inferenceProfile().ppeDelay);
   } else if (message.type === "inference-error") {
     guard.inferenceBusy = false;
     console.warn(message.message);
-    scheduleGuardInference(1800);
+    scheduleGuardInference(Math.max(1800, inferenceProfile().ppeDelay));
+  }
+}
+
+function handlePersonWorkerMessage(message) {
+  if (message.type === "model-status") {
+    if (!guard.modelReady) $("#ppeLoadingText").textContent = `YOLO11n · ${message.message}`;
+  } else if (message.type === "model-progress") {
+    if (!guard.modelReady) {
+      const percent = message.percent || 0;
+      $("#ppeLoading").style.setProperty("--model-progress", `${Math.min(90, percent)}%`);
+      $("#ppeLoadingProgress").textContent = message.total ? `PERSON ${percent}%` : `${Math.round((message.loaded || 0) / 1048576)}MB`;
+    }
+  } else if (message.type === "model-ready") {
+    guard.personModelReady = true;
+    updateGuardUi();
+    schedulePersonInference(100);
+    maybeHideAiLoader();
+  } else if (message.type === "model-error") {
+    console.warn("YOLO11n model error", message.message);
+    guard.personModelReady = false;
+    toast(`YOLO11n 사람 감지 모델 오류: ${message.message}`, 6000);
+    updateGuardUi();
+  } else if (message.type === "result") {
+    guard.personInferenceBusy = false;
+    guard.personDetections = dedupeAnchors((message.detections || []).filter((item) => item.label === "Person")).slice(0, 30);
+    guard.personInferenceFps = message.inferenceMs ? 1000 / message.inferenceMs : 0;
+    guard.peopleCount = guard.personDetections.length || guard.latestAssessments.length;
+    updateGuardUi();
+    schedulePersonInference(inferenceProfile().personDelay);
+  } else if (message.type === "inference-error") {
+    guard.personInferenceBusy = false;
+    console.warn(message.message);
+    schedulePersonInference(Math.max(1600, inferenceProfile().personDelay));
   }
 }
 
@@ -1230,17 +1449,37 @@ function scheduleGuardInference(delay) {
   guard.inferenceTimer = setTimeout(runGuardInference, delay);
 }
 
+function schedulePersonInference(delay) {
+  clearTimeout(guard.personInferenceTimer);
+  if (!guard.active || !guard.personModelReady) return;
+  guard.personInferenceTimer = setTimeout(runPersonInference, delay);
+}
+
 async function runGuardInference() {
   if (!guard.active || !guard.modelReady || guard.inferenceBusy) return;
   const video = $("#guardVideo");
-  if (video.readyState < 2 || !video.videoWidth) return scheduleGuardInference(400);
+  if (video.readyState < 2 || !video.videoWidth) return scheduleGuardInference(500);
   guard.inferenceBusy = true;
   try {
-    const bitmap = await createImageBitmap(video);
-    guard.worker.postMessage({ type: "infer", requestId: Date.now(), bitmap, threshold: guard.config.detection?.confidence || 0.31 }, [bitmap]);
-  } catch {
+    await postInferenceFrame(guard.worker, Date.now(), guard.config.detection?.confidence || 0.31);
+  } catch (error) {
     guard.inferenceBusy = false;
-    scheduleGuardInference(900);
+    console.warn("PPE inference frame error", error);
+    scheduleGuardInference(Math.max(1200, inferenceProfile().ppeDelay));
+  }
+}
+
+async function runPersonInference() {
+  if (!guard.active || !guard.personModelReady || guard.personInferenceBusy) return;
+  const video = $("#guardVideo");
+  if (video.readyState < 2 || !video.videoWidth) return schedulePersonInference(500);
+  guard.personInferenceBusy = true;
+  try {
+    await postInferenceFrame(guard.personWorker, Date.now(), isMobile() ? 0.34 : 0.30);
+  } catch (error) {
+    guard.personInferenceBusy = false;
+    console.warn("Person inference frame error", error);
+    schedulePersonInference(Math.max(1000, inferenceProfile().personDelay));
   }
 }
 
@@ -1262,8 +1501,8 @@ function clearGuardOverlay() {
 function processGuardDetections(message) {
   resizeGuardOverlay();
   const detections = message.detections || [];
-  const assessments = buildPpeAssessments(detections, message.sourceWidth, message.sourceHeight);
-  guard.peopleCount = assessments.length;
+  const assessments = buildPpeAssessments(detections, message.sourceWidth, message.sourceHeight, guard.personDetections);
+  guard.peopleCount = guard.personDetections.length || assessments.length;
   guard.latestAssessments = assessments;
   guard.latestSourceWidth = message.sourceWidth || 0;
   guard.latestSourceHeight = message.sourceHeight || 0;
@@ -1363,8 +1602,8 @@ function dedupeAnchors(items) {
   return kept;
 }
 
-function buildPpeAssessments(detections, sourceWidth, sourceHeight) {
-  const personDetections = detections.filter((item) => item.label === "Person");
+function buildPpeAssessments(detections, sourceWidth, sourceHeight, yolo11Persons = []) {
+  const personDetections = [...yolo11Persons, ...detections.filter((item) => item.label === "Person")];
   const headDetections = detections.filter((item) => ["Hardhat", "NO-Hardhat"].includes(item.label));
 
   // This model frequently emits NO-Hardhat as the worker/head box but omits Person.
@@ -2129,6 +2368,9 @@ function bindEvents() {
   $("#simulateEvent").addEventListener("click", simulateEvent);
   $("#applyEventFilter").addEventListener("click", renderEventTable);
   $("#exportEvents").addEventListener("click", exportEvents);
+  $("#saveEventRetention")?.addEventListener("click", saveEventRetentionSettings);
+  $("#cleanupEventsNow")?.addEventListener("click", cleanupExpiredEvents);
+  $("#deleteAllEvents")?.addEventListener("click", deleteAllEvents);
   $("#printReport").addEventListener("click", () => print());
 
   $("#zoneDeviceSelect").addEventListener("change", loadSelectedZone);

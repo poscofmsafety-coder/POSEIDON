@@ -129,6 +129,20 @@ function preprocess(bitmap) {
   return { input, sourceWidth, sourceHeight, scale, padX, padY };
 }
 
+function preprocessRgba(rgbaBuffer, meta = {}) {
+  const rgba = new Uint8ClampedArray(rgbaBuffer);
+  const expected = INPUT_SIZE * INPUT_SIZE * 4;
+  if (rgba.length !== expected) throw new Error(`RGBA 입력 크기 오류: ${rgba.length} / ${expected}`);
+  const plane = INPUT_SIZE * INPUT_SIZE;
+  const input = new Float32Array(plane * 3);
+  for (let i = 0, pixel = 0; i < rgba.length; i += 4, pixel += 1) {
+    input[pixel] = rgba[i] / 255;
+    input[plane + pixel] = rgba[i + 1] / 255;
+    input[plane * 2 + pixel] = rgba[i + 2] / 255;
+  }
+  return { input, sourceWidth: Number(meta.sourceWidth || INPUT_SIZE), sourceHeight: Number(meta.sourceHeight || INPUT_SIZE), scale: Number(meta.scale || 1), padX: Number(meta.padX || 0), padY: Number(meta.padY || 0) };
+}
+
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
@@ -241,20 +255,22 @@ function parseOutput(tensor, meta, baseThreshold) {
   return nms(candidates);
 }
 
-async function infer(bitmap, threshold = 0.31) {
+async function inferPrepared(meta, threshold = 0.31) {
   const activeSession = await ensureSession();
   const started = performance.now();
-  const meta = preprocess(bitmap);
   const tensor = new ort.Tensor("float32", meta.input, [1, 3, INPUT_SIZE, INPUT_SIZE]);
   const outputs = await activeSession.run({ [activeSession.inputNames[0]]: tensor });
   const output = outputs[activeSession.outputNames[0]];
   const detections = parseOutput(output, meta, threshold);
-  return {
-    detections,
-    sourceWidth: meta.sourceWidth,
-    sourceHeight: meta.sourceHeight,
-    inferenceMs: performance.now() - started,
-  };
+  return { detections, sourceWidth: meta.sourceWidth, sourceHeight: meta.sourceHeight, inferenceMs: performance.now() - started };
+}
+
+async function infer(bitmap, threshold = 0.31) {
+  return inferPrepared(preprocess(bitmap), threshold);
+}
+
+async function inferRgba(rgbaBuffer, meta, threshold = 0.31) {
+  return inferPrepared(preprocessRgba(rgbaBuffer, meta), threshold);
 }
 
 self.onmessage = async (event) => {
@@ -269,6 +285,15 @@ self.onmessage = async (event) => {
       post("result", { requestId: message.requestId, ...result });
     } catch (error) {
       try { message.bitmap.close(); } catch { /* noop */ }
+      post("inference-error", { requestId: message.requestId, message: error?.message || String(error) });
+    }
+    return;
+  }
+  if (message.type === "infer-rgba" && message.rgba) {
+    try {
+      const result = await inferRgba(message.rgba, message.meta || {}, Number(message.threshold || 0.31));
+      post("result", { requestId: message.requestId, ...result });
+    } catch (error) {
       post("inference-error", { requestId: message.requestId, message: error?.message || String(error) });
     }
   }

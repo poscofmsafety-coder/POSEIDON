@@ -1,10 +1,15 @@
 {
   "project": "POSEIDON",
-  "version": "5.3.0",
+  "version": "6.0.0",
   "theme": "mythology-command",
   "cloudflare": "workers+d1+durable-objects",
   "durableObjects": "exports-sqlite",
   "learning": "human-in-the-loop-auto-collection-dedupe-storage-meter",
   "zoneControl": "local-and-admin-master-off",
-  "trainingStorage": "D1-soft-cap-300MB"
+  "trainingStorage": "D1-soft-cap-300MB",
+  "personDetection": "YOLO11n-COCO-ONNX",
+  "mobileInference": "rgba-fallback+camera-permission-fallback",
+  "eventRetention": "daily-cron+manual-delete+30d-default",
+  "colabTraining": "T4-ready",
+  "kaggleTraining": "dataset-download-pipeline"
 }

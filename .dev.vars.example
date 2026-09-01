@@ -2,3 +2,6 @@ ADMIN_PIN=2468
 USER_PIN=1357
 SESSION_SECRET=replace-with-a-long-random-secret
 TURN_ICE_SERVERS=[]
+
+# Optional: override YOLO11n person detection ONNX source
+YOLO11N_MODEL_URL=https://huggingface.co/webnn/yolo11n/resolve/main/onnx/yolo11n.onnx

@@ -130,7 +130,7 @@
               </div>
               <div class="guard-metrics">
                 <div><span>장치 상태</span><b id="guardConnectionMetric">OFFLINE</b></div>
-                <div><span>보호구 AI</span><b id="guardModelMetric">대기</b></div>
+                <div><span>분석 AI</span><b id="guardModelMetric">대기</b></div>
                 <div><span>감지 인원</span><b id="guardPeopleMetric">0명</b></div>
                 <div><span>분석 속도</span><b id="guardFpsMetric">0.0 FPS</b></div>
                 <div><span>중앙 관제</span><b id="guardViewerMetric">0명 연결</b></div>
@@ -162,8 +162,24 @@
                   <label>실제 보안경<select id="trainingGogLabel"><option value="">선택</option><option value="on">착용</option><option value="off">미착용</option><option value="unknown">판정불가</option></select></label>
                   <label>실제 마스크<select id="trainingMaskLabel"><option value="">선택</option><option value="on">착용</option><option value="off">미착용</option><option value="unknown">판정불가</option></select></label>
                 </div>
-                <button class="primary-button full-button" id="saveTrainingSample" type="button">현재 작업자 장면 학습데이터로 저장</button>
-                <div class="training-save-status"><span>이번 브라우저 저장</span><b id="trainingSavedCount">0건</b></div>
+                <button class="primary-button full-button" id="saveTrainingSample" type="button">현재 작업자 장면 1장 저장</button>
+                <div class="auto-training-box">
+                  <div class="auto-training-title"><div><b>30초 자동 학습모드</b><small>한 명만 화면에 두고 자세·각도·거리를 천천히 바꾸세요. 거의 같은 프레임은 자동 제외됩니다.</small></div><span>AUTO</span></div>
+                  <div class="auto-training-controls">
+                    <label>수집 시간<select id="autoTrainingDuration"><option value="30" selected>30초</option><option value="60">60초</option><option value="120">120초</option></select></label>
+                    <label>촬영 간격<select id="autoTrainingInterval"><option value="2" selected>2초</option><option value="3">3초</option><option value="5">5초</option></select></label>
+                  </div>
+                  <div class="auto-training-actions"><button class="primary-button" id="autoTrainingStart" type="button">자동수집 시작</button><button class="secondary-button" id="autoTrainingStop" type="button" disabled>중지</button></div>
+                  <div class="auto-training-progress"><i id="autoTrainingProgress"></i></div>
+                  <p class="auto-training-status" id="autoTrainingStatus">대기</p>
+                  <p class="auto-training-counts" id="autoTrainingCounts">저장 0 · 중복 제외 0 · 오류 0</p>
+                </div>
+                <div class="training-storage-box">
+                  <div class="training-save-status"><span>이번 브라우저 저장</span><b id="trainingSavedCount">0건</b></div>
+                  <div class="training-storage-meter"><i id="trainingStorageBar"></i></div>
+                  <p id="trainingStorageText">저장용량 조회 중...</p>
+                  <small id="trainingStorageHint">무료 저장공간을 보호하기 위해 학습이미지에 권장 상한을 적용합니다.</small>
+                </div>
               </section>
               <section class="panel radio-panel">
                 <div class="panel-header"><div><p class="eyebrow">TWO-WAY RADIO</p><h3>관제센터 무전</h3></div><span class="radio-indicator" id="guardRadioIndicator">대기</span></div>
@@ -216,6 +232,13 @@
 
         <section class="page admin-only" id="page-events">
           <div class="section-toolbar"><div><p class="eyebrow">SAFETY EVENT CENTER</p><h2>이벤트 센터</h2></div><button class="secondary-button" id="exportEvents" type="button">CSV 내보내기</button></div>
+          <div class="panel event-retention-panel">
+            <div><p class="eyebrow">DATA RETENTION</p><h3>이벤트 자동 정리</h3><p>이벤트와 연결 스냅숏만 정리하며 AI 학습데이터는 유지합니다.</p></div>
+            <label class="switch-row compact"><span><b>자동 삭제</b><small>Cloudflare 예약 작업으로 매일 정리</small></span><input type="checkbox" id="eventRetentionEnabled" checked /></label>
+            <label>보관기간<select id="eventRetentionDays"><option value="7">7일</option><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option><option value="90">90일</option><option value="180">180일</option></select></label>
+            <div class="event-retention-actions"><button class="primary-button" id="saveEventRetention" type="button">보관설정 저장</button><button class="secondary-button" id="cleanupEventsNow" type="button">지난 데이터 지금 정리</button><button class="secondary-button danger-button" id="deleteAllEvents" type="button">이벤트 전체 삭제</button></div>
+            <small id="eventRetentionStats">보관정보 조회 중...</small>
+          </div>
           <div class="filter-bar panel"><select id="eventDeviceFilter"><option value="">전체 장치</option></select><select id="eventCategoryFilter"><option value="">전체 유형</option><option>위험구역</option><option>보호구</option><option>불안전 행동</option><option>작업환경</option><option>중장비</option></select><select id="eventSeverityFilter"><option value="">전체 등급</option><option value="critical">긴급</option><option value="high">위험</option><option value="medium">주의</option></select><button class="primary-button" id="applyEventFilter" type="button">조회</button></div>
           <div class="panel table-panel"><table class="data-table"><thead><tr><th>발생시간</th><th>장치</th><th>유형</th><th>등급</th><th>내용</th><th>상태</th><th>조치</th></tr></thead><tbody id="eventTableBody"></tbody></table></div>
         </section>
@@ -255,6 +278,6 @@
     <div class="sidebar-scrim" id="sidebarScrim"></div>
 
     <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js" defer></script>
-    <script type="module" src="/app.js?v=5.2.1"></script>
+    <script type="module" src="/app.js?v=5.3.0"></script>
   </body>
 </html>

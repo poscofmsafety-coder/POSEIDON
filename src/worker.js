@@ -60,6 +60,11 @@ const SCHEMA = [
     reviewed INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL
   )`,
+  `CREATE TABLE IF NOT EXISTS app_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`,
   `CREATE INDEX IF NOT EXISTS idx_training_device ON training_samples(device_id, captured_at DESC)`,
   `CREATE INDEX IF NOT EXISTS idx_media_updated_at ON media(updated_at DESC)`,
   `CREATE INDEX IF NOT EXISTS idx_events_occurred_at ON events(occurred_at DESC)`,
@@ -366,6 +371,53 @@ async function getSummary(env) {
   };
 }
 
+async function readSetting(env, key, fallback) {
+  const row = await env.DB.prepare("SELECT value FROM app_settings WHERE key=?").bind(key).first();
+  return row?.value ?? fallback;
+}
+
+async function writeSetting(env, key, value) {
+  await env.DB.prepare(`INSERT INTO app_settings (key,value,updated_at) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at`).bind(key, String(value), nowIso()).run();
+}
+
+async function getEventRetentionSettings(env) {
+  const [daysValue, enabledValue, countRow, bytesRow] = await Promise.all([
+    readSetting(env, "event_retention_days", "30"),
+    readSetting(env, "event_auto_cleanup", "true"),
+    env.DB.prepare("SELECT COUNT(*) AS count FROM events").first(),
+    env.DB.prepare("SELECT COALESCE(SUM(byte_length),0) AS bytes FROM media WHERE key LIKE 'events/%'").first(),
+  ]);
+  return {
+    days: Math.min(365, Math.max(1, Number(daysValue || 30))),
+    enabled: String(enabledValue) !== "false",
+    eventCount: Number(countRow?.count || 0),
+    snapshotBytes: Number(bytesRow?.bytes || 0),
+  };
+}
+
+async function cleanupEventsOlderThan(env, days) {
+  const safeDays = Math.min(365, Math.max(1, Number(days || 30)));
+  const cutoff = new Date(Date.now() - safeDays * 86400000).toISOString();
+  const countRow = await env.DB.prepare("SELECT COUNT(*) AS count FROM events WHERE occurred_at < ?").bind(cutoff).first();
+  const deleted = Number(countRow?.count || 0);
+  if (!deleted) return { deleted: 0, cutoff, days: safeDays };
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM media WHERE key IN (SELECT snapshot_key FROM events WHERE occurred_at < ? AND snapshot_key IS NOT NULL)").bind(cutoff),
+    env.DB.prepare("DELETE FROM events WHERE occurred_at < ?").bind(cutoff),
+  ]);
+  return { deleted, cutoff, days: safeDays };
+}
+
+async function deleteAllEvents(env) {
+  const countRow = await env.DB.prepare("SELECT COUNT(*) AS count FROM events").first();
+  const deleted = Number(countRow?.count || 0);
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM media WHERE key LIKE 'events/%'"),
+    env.DB.prepare("DELETE FROM events"),
+  ]);
+  return { deleted };
+}
+
 function exactArrayBuffer(value) {
   if (value instanceof ArrayBuffer) return value;
   if (ArrayBuffer.isView(value)) return value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength);
@@ -451,12 +503,32 @@ async function handleApi(request, env) {
     return json({ ok: true, data: { iceServers: [{ urls: ["stun:stun.cloudflare.com:3478"] }, ...(Array.isArray(extra) ? extra : [])] } });
   }
 
-  const adminOnly = path.startsWith("/api/dashboard/") || path === "/api/devices" || path === "/api/events" || path.startsWith("/api/reports/") || path.startsWith("/api/admin/") || path.startsWith("/api/demo/") || (path.startsWith("/api/devices/") && method !== "GET") || path.match(/^\/api\/events\/[^/]+\/ack$/);
+  const adminOnly = path.startsWith("/api/dashboard/") || path === "/api/devices" || path.startsWith("/api/events") || path.startsWith("/api/reports/") || path.startsWith("/api/admin/") || path.startsWith("/api/demo/") || (path.startsWith("/api/devices/") && method !== "GET") || path.match(/^\/api\/events\/[^/]+\/ack$/);
   if (adminOnly && !isAdmin) return error("관리자 권한이 필요합니다.", 403);
 
   if (path === "/api/dashboard/summary" && method === "GET") return json({ ok: true, data: await getSummary(env) });
   if (path === "/api/devices" && method === "GET") return json({ ok: true, data: await getDevices(env) });
   if (path === "/api/events" && method === "GET") return json({ ok: true, data: await getEvents(env, url) });
+  if (path === "/api/events" && method === "DELETE") return json({ ok: true, data: await deleteAllEvents(env) });
+
+  if (path === "/api/events/settings" && method === "GET") {
+    return json({ ok: true, data: await getEventRetentionSettings(env) });
+  }
+  if (path === "/api/events/settings" && method === "PUT") {
+    const body = await readJson(request);
+    const days = Math.min(365, Math.max(1, Number(body.days || 30)));
+    const enabled = body.enabled !== false;
+    await Promise.all([
+      writeSetting(env, "event_retention_days", days),
+      writeSetting(env, "event_auto_cleanup", enabled ? "true" : "false"),
+    ]);
+    return json({ ok: true, data: await getEventRetentionSettings(env) });
+  }
+  if (path === "/api/events/cleanup" && method === "POST") {
+    const body = await readJson(request).catch(() => ({}));
+    const settings = await getEventRetentionSettings(env);
+    return json({ ok: true, data: await cleanupEventsOlderThan(env, body.days || settings.days) });
+  }
 
   if (path === "/api/reports/daily" && method === "GET") {
     const days = Math.min(Math.max(Number(url.searchParams.get("days") || 7), 1), 31);
@@ -539,6 +611,17 @@ async function handleApi(request, env) {
     const result = await env.DB.prepare("UPDATE devices SET config_json=?,updated_at=? WHERE id=?").bind(JSON.stringify(config), nowIso(), deviceId).run();
     if (!result.meta?.changes) return error("장치를 찾을 수 없습니다.", 404);
     return json({ ok: true, data: config });
+  }
+
+  const deleteEventMatch = path.match(/^\/api\/events\/([^/]+)$/);
+  if (deleteEventMatch && method === "DELETE") {
+    const eventId = decodeURIComponent(deleteEventMatch[1]);
+    const row = await env.DB.prepare("SELECT snapshot_key FROM events WHERE id=?").bind(eventId).first();
+    if (!row) return error("이벤트를 찾을 수 없습니다.", 404);
+    const statements = [env.DB.prepare("DELETE FROM events WHERE id=?").bind(eventId)];
+    if (row.snapshot_key) statements.unshift(env.DB.prepare("DELETE FROM media WHERE key=?").bind(row.snapshot_key));
+    await env.DB.batch(statements);
+    return json({ ok: true });
   }
 
   const ackMatch = path.match(/^\/api\/events\/([^/]+)\/ack$/);
@@ -674,22 +757,31 @@ async function handleMedia(request, env) {
   return new Response(body, { headers: { "content-type": row.content_type || "image/jpeg", "content-length": String(row.byte_length || body.byteLength), "cache-control": "no-store", "x-media-storage": "d1" } });
 }
 
-async function handleModel(request, env, ctx) {
-  const modelUrl = env.PPE_MODEL_URL || "https://huggingface.co/ayushgupta7777/safetyvision-yolov8/resolve/main/v2/best_640.onnx";
+async function proxyModel(request, ctx, modelUrl, cachePath, filename, errorMessage) {
   const cache = caches.default;
-  const cacheKey = new Request(new URL("/models/ppe.onnx", request.url), { method: "GET" });
+  const cacheKey = new Request(new URL(cachePath, request.url), { method: "GET" });
   const cached = await cache.match(cacheKey);
   if (cached) return cached;
-  const upstream = await fetch(modelUrl, { redirect: "follow", headers: { "user-agent": "POSCO-FutureM-Smart-Safety-Guardian/2.0" } });
-  if (!upstream.ok) return error("보호구 모델을 불러오지 못했습니다.", 502, `upstream ${upstream.status}`);
+  const upstream = await fetch(modelUrl, { redirect: "follow", headers: { "user-agent": "POSEIDON-AI-Safety/6.0" } });
+  if (!upstream.ok) return error(errorMessage, 502, `upstream ${upstream.status}`);
   const headers = new Headers(upstream.headers);
   headers.set("content-type", "application/octet-stream");
   headers.set("cache-control", "public, max-age=86400, s-maxage=604800");
-  headers.set("content-disposition", "inline; filename=ppe.onnx");
+  headers.set("content-disposition", `inline; filename=${filename}`);
   headers.delete("set-cookie");
   const response = new Response(upstream.body, { status: 200, headers });
   ctx.waitUntil(cache.put(cacheKey, response.clone()).catch(() => {}));
   return response;
+}
+
+async function handlePpeModel(request, env, ctx) {
+  const modelUrl = env.PPE_MODEL_URL || "https://huggingface.co/ayushgupta7777/safetyvision-yolov8/resolve/main/v2/best_640.onnx";
+  return proxyModel(request, ctx, modelUrl, "/models/ppe.onnx", "ppe.onnx", "보호구 모델을 불러오지 못했습니다.");
+}
+
+async function handlePersonModel(request, env, ctx) {
+  const modelUrl = env.YOLO11N_MODEL_URL || "https://huggingface.co/webnn/yolo11n/resolve/main/onnx/yolo11n.onnx";
+  return proxyModel(request, ctx, modelUrl, "/models/person.onnx", "yolo11n.onnx", "YOLO11n 사람 감지 모델을 불러오지 못했습니다.");
 }
 
 export default {
@@ -697,7 +789,8 @@ export default {
     const url = new URL(request.url);
     if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: { "access-control-allow-methods": "GET,POST,PUT,DELETE,OPTIONS", "access-control-allow-headers": "content-type,authorization", "access-control-allow-credentials": "true" } });
     try {
-      if (url.pathname === "/models/ppe.onnx") return await handleModel(request, env, ctx);
+      if (url.pathname === "/models/ppe.onnx") return await handlePpeModel(request, env, ctx);
+      if (url.pathname === "/models/person.onnx") return await handlePersonModel(request, env, ctx);
       if (url.pathname.startsWith("/api/")) return await handleApi(request, env);
       if (url.pathname.startsWith("/media/")) return await handleMedia(request, env);
       const assetResponse = await env.ASSETS.fetch(request);
@@ -712,5 +805,15 @@ export default {
       console.error(err);
       return error("서버 처리 중 오류가 발생했습니다.", 500, String(err?.message || err));
     }
+  },
+  async scheduled(_controller, env, ctx) {
+    ctx.waitUntil((async () => {
+      await ensureSchema(env);
+      const settings = await getEventRetentionSettings(env);
+      if (settings.enabled) {
+        const result = await cleanupEventsOlderThan(env, settings.days);
+        console.log(`POSEIDON event retention cleanup: ${result.deleted} deleted, ${settings.days} days retained`);
+      }
+    })());
   },
 };
