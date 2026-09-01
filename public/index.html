@@ -7,7 +7,7 @@
     <meta name="description" content="POSCO Future M 스마트 안전지킴이 - 브라우저 AI 안전 CCTV와 통합 관제" />
     <title>POSEIDON 스마트 안전지킴이 | POSCO Future M</title>
     <link rel="icon" href="/favicon.svg" />
-    <link rel="stylesheet" href="/styles.css?v=6.3.0" />
+    <link rel="stylesheet" href="/styles.css?v=6.9.0" />
   </head>
   <body>
     <div class="login-screen" id="loginScreen" hidden>
@@ -53,6 +53,7 @@
           <button class="nav-item" data-page="environment" type="button"><span>◇</span>작업환경</button>
           <button class="nav-item" data-page="equipment" type="button"><span>▰</span>중장비</button>
           <button class="nav-item" data-page="law" type="button"><span>§</span>스마트 안전보건법령</button>
+          <button class="nav-item" data-page="msds" type="button"><span>▧</span>스마트 MSDS</button>
           <button class="nav-item" data-page="events" type="button"><span>≡</span>이벤트 센터</button>
           <button class="nav-item" data-page="reports" type="button"><span>↗</span>리포트</button>
           <button class="nav-item" data-page="settings" type="button"><span>⚙</span>설정</button>
@@ -61,6 +62,7 @@
         <nav class="nav-list user-only" aria-label="현장 사용자 메뉴">
           <button class="nav-item active" data-page="guard" type="button"><span>◉</span>현장 지킴이</button>
           <button class="nav-item" data-page="law" type="button"><span>§</span>스마트 안전보건법령</button>
+          <button class="nav-item" data-page="msds" type="button"><span>▧</span>스마트 MSDS</button>
           <button class="nav-item" data-page="user-help" type="button"><span>?</span>사용 안내</button>
         </nav>
 
@@ -110,6 +112,11 @@
               <form class="law-quick-form" id="adminLawQuickForm"><input id="adminLawQuickInput" autocomplete="off" maxlength="80" placeholder="예: 밀폐공간, 적정공기, 하역운반기계" /><button class="primary-button" type="submit">검색</button></form>
               <div class="law-quick-chips"><button type="button" data-law-query="밀폐공간">밀폐공간</button><button type="button" data-law-query="적정공기">적정공기</button><button type="button" data-law-query="하역운반기계">하역운반기계</button><button type="button" data-law-query="접지">접지</button><button type="button" data-law-query="누전차단">누전차단</button></div>
               <button class="text-button law-more-button" data-goto="law" type="button">법령 검색 화면 열기 →</button>
+            </article>
+            <article class="panel msds-quick-card">
+              <div class="panel-header"><div><p class="eyebrow">SMART MSDS LIBRARY</p><h3>스마트 MSDS</h3></div><span class="msds-live-badge">PDF</span></div>
+              <p>관리자가 등록한 물질안전보건자료를 현장에서 검색하고 포세이돈 안에서 바로 열람합니다.</p>
+              <button class="primary-button full-button" data-goto="msds" type="button">MSDS 자료실 열기</button>
             </article>
             <article class="panel panel-large">
               <div class="panel-header"><div><p class="eyebrow">REAL-TIME EVENTS</p><h3>최근 위험 이벤트</h3></div><button class="text-button" data-goto="events" type="button">이벤트 센터 →</button></div>
@@ -196,6 +203,11 @@
                 <form class="law-quick-form" id="guardLawQuickForm"><input id="guardLawQuickInput" autocomplete="off" maxlength="80" placeholder="예: 밀폐공간, 접지, 누전차단" /><button class="primary-button" type="submit">검색</button></form>
                 <div class="law-quick-chips"><button type="button" data-law-query="밀폐공간">밀폐공간</button><button type="button" data-law-query="적정공기">적정공기</button><button type="button" data-law-query="하역운반기계">하역운반기계</button><button type="button" data-law-query="접지">접지</button><button type="button" data-law-query="누전차단">누전차단</button></div>
                 <button class="text-button law-more-button" data-goto="law" type="button">상세 법령 검색 →</button>
+              </section>
+              <section class="panel msds-quick-card guard-msds-card">
+                <div class="panel-header"><div><p class="eyebrow">FIELD MSDS VIEWER</p><h3>스마트 MSDS</h3></div><span class="msds-live-badge">현장열람</span></div>
+                <p>관리자가 등록한 물질안전보건자료를 검색해 현장에서 바로 확인합니다.</p>
+                <button class="primary-button full-button" data-goto="msds" type="button">MSDS 물질안전보건자료 보기</button>
               </section>
               <section class="panel radio-panel">
                 <div class="panel-header"><div><p class="eyebrow">TWO-WAY RADIO</p><h3>관제센터 무전</h3></div><span class="radio-indicator" id="guardRadioIndicator">대기</span></div>
@@ -320,6 +332,63 @@
           </div>
         </section>
 
+        <section class="page" id="page-msds">
+          <div class="section-toolbar msds-toolbar">
+            <div><p class="eyebrow">POSEIDON · SMART MSDS</p><h2>스마트 MSDS 물질안전보건자료 뷰어</h2><p class="section-lead">관리자가 등록한 MSDS PDF를 물질명·제품명·제조사·키워드로 검색하고 현장에서 바로 열람합니다.</p></div>
+            <span class="msds-source-chip">현장 자료실</span>
+          </div>
+
+          <section class="panel msds-upload-panel admin-only" id="msdsUploadPanel">
+            <div class="msds-upload-copy"><p class="eyebrow">ADMIN UPLOAD</p><h3>MSDS 자료 등록</h3><p>PDF 파일을 등록하면 관리자와 현장 사용자가 동일한 자료를 포세이돈 뷰어에서 확인할 수 있습니다.</p></div>
+            <form id="msdsUploadForm" class="msds-upload-form">
+              <div class="msds-drop-zone" id="msdsDropZone" tabindex="0" role="button" aria-label="MSDS PDF 선택">
+                <input id="msdsFileInput" type="file" accept="application/pdf,.pdf" hidden />
+                <span class="msds-drop-icon">PDF</span>
+                <div><b id="msdsFileLabel">PDF 파일 선택 또는 여기로 끌어놓기</b><small>파일 1개당 최대 12MB · PDF만 등록</small></div>
+              </div>
+              <div class="msds-upload-fields">
+                <label>물질명 / 제품명<input id="msdsTitleInput" maxlength="120" placeholder="예: 아세톤 / 제품명" required /></label>
+                <label>제조사<input id="msdsManufacturerInput" maxlength="120" placeholder="선택 입력" /></label>
+                <label class="msds-keyword-field">검색 키워드<input id="msdsKeywordsInput" maxlength="240" placeholder="예: CAS 67-64-1, 유기용제, 인화성" /></label>
+              </div>
+              <div class="msds-upload-actions"><button class="primary-button" id="msdsUploadButton" type="submit">MSDS 업로드</button><span id="msdsStorageText">저장공간 조회 중...</span></div>
+            </form>
+          </section>
+
+          <section class="panel msds-search-panel">
+            <form class="msds-search-form" id="msdsSearchForm">
+              <label><span>자료 검색</span><input id="msdsSearchInput" autocomplete="off" maxlength="80" placeholder="물질명, 제품명, 제조사, CAS 번호 또는 키워드" /></label>
+              <button class="primary-button" id="msdsSearchButton" type="submit">검색</button>
+              <button class="secondary-button" id="msdsResetSearch" type="button">전체 보기</button>
+            </form>
+          </section>
+
+          <div class="msds-library-layout">
+            <section class="panel msds-library-panel">
+              <div class="panel-header"><div><p class="eyebrow">MSDS LIBRARY</p><h3>등록 자료</h3></div><span class="msds-count-badge" id="msdsCountBadge">0건</span></div>
+              <div class="msds-document-list" id="msdsDocumentList">
+                <div class="msds-empty-list"><span>▧</span><b>등록된 MSDS가 없습니다</b><small>관리자가 PDF를 등록하면 여기에 표시됩니다.</small></div>
+              </div>
+            </section>
+
+            <section class="panel msds-viewer-panel">
+              <div class="msds-viewer-head">
+                <div><p class="eyebrow">MATERIAL SAFETY DATA SHEET</p><h3 id="msdsViewerTitle">MSDS 자료를 선택하세요</h3><p id="msdsViewerMeta">왼쪽 자료목록에서 문서를 선택하면 이 화면에서 바로 열립니다.</p></div>
+                <div class="msds-viewer-actions">
+                  <a class="secondary-button" id="msdsOpenNewTab" href="#" target="_blank" rel="noopener noreferrer" hidden>새 창에서 보기 ↗</a>
+                  <a class="secondary-button" id="msdsDownloadLink" href="#" download hidden>PDF 저장</a>
+                  <button class="danger-button admin-only" id="msdsDeleteButton" type="button" hidden>자료 삭제</button>
+                </div>
+              </div>
+              <div class="msds-viewer-shell" id="msdsViewerShell">
+                <div class="msds-viewer-empty" id="msdsViewerEmpty"><span>▧</span><h3>스마트 MSDS 뷰어</h3><p>등록된 물질안전보건자료를 선택하면 PDF 전체 내용을 이 영역에서 스크롤·확대해 확인할 수 있습니다.</p></div>
+                <iframe id="msdsPdfFrame" title="스마트 MSDS PDF 뷰어" hidden></iframe>
+              </div>
+              <div class="msds-viewer-note"><span>ⓘ</span><p>현장 판단 시 최신 개정본 여부를 확인하세요. 모바일 브라우저에서 PDF가 내장 표시되지 않으면 <b>새 창에서 보기</b>를 사용하세요.</p></div>
+            </section>
+          </div>
+        </section>
+
         <section class="page admin-only" id="page-events">
           <div class="section-toolbar"><div><p class="eyebrow">SAFETY EVENT CENTER</p><h2>이벤트 센터</h2></div><button class="secondary-button" id="exportEvents" type="button">CSV 내보내기</button></div>
           <div class="panel event-retention-panel">
@@ -405,6 +474,6 @@
     <div class="sidebar-scrim" id="sidebarScrim"></div>
 
     <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js" defer></script>
-    <script type="module" src="/app.js?v=6.4.0"></script>
+    <script type="module" src="/app.js?v=6.9.0"></script>
   </body>
 </html>

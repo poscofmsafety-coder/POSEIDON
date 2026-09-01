@@ -1,4 +1,4 @@
-const POSEIDON_BUILD = "6.7.0";
+const POSEIDON_BUILD = "6.9.0";
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -15,6 +15,7 @@ const pageTitles = {
   environment: "작업환경",
   equipment: "중장비",
   law: "스마트 안전보건법령",
+  msds: "스마트 MSDS",
   events: "이벤트 센터",
   reports: "리포트",
   settings: "설정",
@@ -118,6 +119,7 @@ const state = {
   rtc: { relayConfigured: false, iceServerCount: 1 },
   stopWorkSeenIds: new Set(),
   stopWorkAlertInitialized: false,
+  msds: { items: [], selectedId: null, query: "", stats: { count: 0, totalBytes: 0, softLimitBytes: 0 }, selectedFile: null },
 };
 
 const realtime = {
@@ -358,7 +360,7 @@ async function logout() {
 
 function goToPage(page) {
   if (!pageTitles[page]) return;
-  if (state.session?.role === "user" && !["guard", "law", "user-help"].includes(page)) page = "guard";
+  if (state.session?.role === "user" && !["guard", "law", "msds", "user-help"].includes(page)) page = "guard";
   state.currentPage = page;
   $$(".page").forEach((section) => section.classList.toggle("active", section.id === `page-${page}`));
   $$(".nav-item").forEach((button) => button.classList.toggle("active", button.dataset.page === page));
@@ -371,6 +373,7 @@ function goToPage(page) {
     if (page === "reports") renderReports();
     if (page === "events") loadEventRetentionSettings();
   }
+  if (page === "msds") loadMsdsDocuments();
 }
 
 function updateClock() {
@@ -3501,6 +3504,173 @@ function renderReports() {
   $("#recommendations").innerHTML = [top ? `가장 빈번한 ‘${top[0]}’ 이벤트를 중심으로 현장 점검과 TBM 교육을 강화하세요.` : "현재 누적 이벤트가 적어 안정적으로 운영되고 있습니다.", "보호구 AI 결과는 현장 관리자 확인 후 조치 자료로 활용하세요.", "무전 호출 이력과 고위험 이벤트를 함께 검토하면 대응 시간을 줄일 수 있습니다."].map((text) => `<div class="recommendation">${escapeHtml(text)}</div>`).join("");
 }
 
+
+/* ---------- Smart MSDS library ---------- */
+
+function formatBytes(bytes) {
+  const value = Number(bytes || 0);
+  if (!Number.isFinite(value) || value <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  let size = value;
+  let unit = 0;
+  while (size >= 1024 && unit < units.length - 1) { size /= 1024; unit += 1; }
+  return `${size >= 10 || unit === 0 ? size.toFixed(0) : size.toFixed(1)} ${units[unit]}`;
+}
+
+function msdsFileUrl(id, download = false) {
+  const base = `/api/msds/${encodeURIComponent(id)}/file`;
+  return download ? `${base}?download=1` : base;
+}
+
+function setMsdsSelectedFile(file) {
+  state.msds.selectedFile = file || null;
+  const label = $("#msdsFileLabel");
+  if (!label) return;
+  if (!file) {
+    label.textContent = "PDF 파일 선택 또는 여기로 끌어놓기";
+    return;
+  }
+  label.textContent = `${file.name} · ${formatBytes(file.size)}`;
+  const titleInput = $("#msdsTitleInput");
+  if (titleInput && !titleInput.value.trim()) titleInput.value = file.name.replace(/\.pdf$/i, "");
+}
+
+function renderMsdsStorage(stats = state.msds.stats) {
+  state.msds.stats = stats || state.msds.stats;
+  const storage = $("#msdsStorageText");
+  const count = $("#msdsCountBadge");
+  if (storage) {
+    const limit = Number(stats?.softLimitBytes || 0);
+    const used = Number(stats?.totalBytes || 0);
+    storage.textContent = limit > 0
+      ? `MSDS ${stats?.count || 0}건 · ${formatBytes(used)} / 권장 ${formatBytes(limit)}`
+      : `MSDS ${stats?.count || 0}건 · ${formatBytes(used)}`;
+  }
+  if (count) count.textContent = `${stats?.count || 0}건`;
+}
+
+function renderMsdsDocuments() {
+  const list = $("#msdsDocumentList");
+  if (!list) return;
+  const items = state.msds.items || [];
+  if (!items.length) {
+    list.innerHTML = `<div class="msds-empty-list"><span>▧</span><b>${state.msds.query ? "검색 결과가 없습니다" : "등록된 MSDS가 없습니다"}</b><small>${state.msds.query ? "다른 물질명·제조사·CAS 번호로 검색해보세요." : "관리자가 PDF를 등록하면 여기에 표시됩니다."}</small></div>`;
+    clearMsdsViewer();
+    return;
+  }
+  list.innerHTML = items.map((item) => `<button class="msds-document-item ${item.id === state.msds.selectedId ? "active" : ""}" data-msds-id="${escapeHtml(item.id)}" type="button">
+    <span class="msds-doc-icon">PDF</span>
+    <span class="msds-doc-main"><b>${escapeHtml(item.title || item.originalName || "MSDS")}</b><small>${escapeHtml(item.manufacturer || "제조사 미입력")} · ${formatBytes(item.byteLength)}</small><em>${escapeHtml(item.originalName || "")}</em></span>
+    <span class="msds-doc-arrow">›</span>
+  </button>`).join("");
+  $$('[data-msds-id]', list).forEach((button) => button.addEventListener("click", () => openMsdsDocument(button.dataset.msdsId)));
+}
+
+function clearMsdsViewer() {
+  state.msds.selectedId = null;
+  const frame = $("#msdsPdfFrame");
+  if (frame) { frame.hidden = true; frame.removeAttribute("src"); }
+  if ($("#msdsViewerEmpty")) $("#msdsViewerEmpty").hidden = false;
+  if ($("#msdsViewerTitle")) $("#msdsViewerTitle").textContent = "MSDS 자료를 선택하세요";
+  if ($("#msdsViewerMeta")) $("#msdsViewerMeta").textContent = "왼쪽 자료목록에서 문서를 선택하면 이 화면에서 바로 열립니다.";
+  [$("#msdsOpenNewTab"), $("#msdsDownloadLink"), $("#msdsDeleteButton")].forEach((el) => { if (el) el.hidden = true; });
+}
+
+function openMsdsDocument(id) {
+  const item = (state.msds.items || []).find((entry) => entry.id === id);
+  if (!item) return;
+  state.msds.selectedId = id;
+  renderMsdsDocuments();
+  const inlineUrl = `${msdsFileUrl(id)}#toolbar=1&navpanes=0&view=FitH`;
+  const frame = $("#msdsPdfFrame");
+  if (frame) { frame.src = inlineUrl; frame.hidden = false; }
+  if ($("#msdsViewerEmpty")) $("#msdsViewerEmpty").hidden = true;
+  if ($("#msdsViewerTitle")) $("#msdsViewerTitle").textContent = item.title || item.originalName || "MSDS";
+  if ($("#msdsViewerMeta")) {
+    const details = [item.manufacturer || "제조사 미입력", formatBytes(item.byteLength), `등록 ${formatDate(item.uploadedAt)}`];
+    if (item.keywords) details.push(item.keywords);
+    $("#msdsViewerMeta").textContent = details.join(" · ");
+  }
+  const newTab = $("#msdsOpenNewTab");
+  if (newTab) { newTab.href = msdsFileUrl(id); newTab.hidden = false; }
+  const download = $("#msdsDownloadLink");
+  if (download) { download.href = msdsFileUrl(id, true); download.download = item.originalName || `${item.title || "MSDS"}.pdf`; download.hidden = false; }
+  const del = $("#msdsDeleteButton");
+  if (del && state.session?.role === "admin") del.hidden = false;
+}
+
+async function loadMsdsDocuments(query = state.msds.query, { preserveSelection = true } = {}) {
+  const q = String(query || "").trim();
+  state.msds.query = q;
+  const list = $("#msdsDocumentList");
+  if (list) list.innerHTML = `<div class="msds-loading"><span class="law-state-orb"></span><b>MSDS 자료 불러오는 중</b></div>`;
+  try {
+    const data = await api(`/api/msds${q ? `?q=${encodeURIComponent(q)}` : ""}`);
+    state.msds.items = Array.isArray(data?.items) ? data.items : [];
+    renderMsdsStorage(data?.stats || {});
+    const selectedStillExists = preserveSelection && state.msds.items.some((item) => item.id === state.msds.selectedId);
+    renderMsdsDocuments();
+    if (selectedStillExists) openMsdsDocument(state.msds.selectedId);
+    else if (state.msds.items.length) openMsdsDocument(state.msds.items[0].id);
+    else clearMsdsViewer();
+  } catch (error) {
+    if (list) list.innerHTML = `<div class="msds-empty-list error"><span>!</span><b>MSDS 자료를 불러오지 못했습니다</b><small>${escapeHtml(error.message)}</small></div>`;
+    toast(error.message);
+  }
+}
+
+async function uploadMsdsDocument(event) {
+  event?.preventDefault?.();
+  if (state.session?.role !== "admin") return;
+  const file = state.msds.selectedFile || $("#msdsFileInput")?.files?.[0];
+  const title = $("#msdsTitleInput")?.value?.trim() || "";
+  if (!file) { toast("등록할 MSDS PDF를 선택해주세요."); return; }
+  if (!title) { toast("물질명 또는 제품명을 입력해주세요."); return; }
+  if (!/\.pdf$/i.test(file.name) && file.type !== "application/pdf") { toast("PDF 파일만 등록할 수 있습니다."); return; }
+  if (file.size > 12 * 1024 * 1024) { toast("MSDS PDF는 파일 1개당 12MB 이하로 등록해주세요.", 5000); return; }
+  const button = $("#msdsUploadButton");
+  if (button) { button.disabled = true; button.textContent = "업로드 중..."; }
+  try {
+    const form = new FormData();
+    form.append("file", file, file.name);
+    form.append("title", title);
+    form.append("manufacturer", $("#msdsManufacturerInput")?.value?.trim() || "");
+    form.append("keywords", $("#msdsKeywordsInput")?.value?.trim() || "");
+    const data = await api("/api/msds", { method: "POST", body: form });
+    toast("MSDS 자료를 등록했습니다.");
+    $("#msdsUploadForm")?.reset();
+    setMsdsSelectedFile(null);
+    state.msds.query = "";
+    if ($("#msdsSearchInput")) $("#msdsSearchInput").value = "";
+    await loadMsdsDocuments("", { preserveSelection: false });
+    if (data?.id) openMsdsDocument(data.id);
+  } catch (error) {
+    toast(error.message, 5000);
+  } finally {
+    if (button) { button.disabled = false; button.textContent = "MSDS 업로드"; }
+  }
+}
+
+async function deleteSelectedMsds() {
+  if (state.session?.role !== "admin" || !state.msds.selectedId) return;
+  const item = state.msds.items.find((entry) => entry.id === state.msds.selectedId);
+  if (!item) return;
+  if (!confirm(`“${item.title || item.originalName}” MSDS 자료를 삭제하시겠습니까?`)) return;
+  try {
+    await api(`/api/msds/${encodeURIComponent(item.id)}`, { method: "DELETE" });
+    toast("MSDS 자료를 삭제했습니다.");
+    state.msds.selectedId = null;
+    await loadMsdsDocuments(state.msds.query, { preserveSelection: false });
+  } catch (error) { toast(error.message, 5000); }
+}
+
+function handleMsdsFileSelection(file) {
+  if (!file) { setMsdsSelectedFile(null); return; }
+  if (!/\.pdf$/i.test(file.name) && file.type !== "application/pdf") { toast("PDF 파일만 등록할 수 있습니다."); return; }
+  setMsdsSelectedFile(file);
+}
+
+
 /* ---------- QR, export and UI ---------- */
 
 function guardLink() {
@@ -3557,6 +3727,17 @@ function bindEvents() {
   $("#adminLawQuickForm")?.addEventListener("submit", (event) => { event.preventDefault(); submitQuickLawSearch("#adminLawQuickInput"); });
   $("#guardLawQuickForm")?.addEventListener("submit", (event) => { event.preventDefault(); submitQuickLawSearch("#guardLawQuickInput"); });
   $$('[data-law-query]').forEach((button) => button.addEventListener("click", () => searchSafetyLaw(button.dataset.lawQuery)));
+  $("#msdsSearchForm")?.addEventListener("submit", (event) => { event.preventDefault(); loadMsdsDocuments($("#msdsSearchInput")?.value || "", { preserveSelection: false }); });
+  $("#msdsResetSearch")?.addEventListener("click", () => { if ($("#msdsSearchInput")) $("#msdsSearchInput").value = ""; loadMsdsDocuments("", { preserveSelection: false }); });
+  $("#msdsUploadForm")?.addEventListener("submit", uploadMsdsDocument);
+  $("#msdsFileInput")?.addEventListener("change", (event) => handleMsdsFileSelection(event.target.files?.[0]));
+  $("#msdsDeleteButton")?.addEventListener("click", deleteSelectedMsds);
+  const msdsDropZone = $("#msdsDropZone");
+  msdsDropZone?.addEventListener("click", () => $("#msdsFileInput")?.click());
+  msdsDropZone?.addEventListener("keydown", (event) => { if (["Enter", " "].includes(event.key)) { event.preventDefault(); $("#msdsFileInput")?.click(); } });
+  ["dragenter", "dragover"].forEach((name) => msdsDropZone?.addEventListener(name, (event) => { event.preventDefault(); msdsDropZone.classList.add("dragging"); }));
+  ["dragleave", "drop"].forEach((name) => msdsDropZone?.addEventListener(name, (event) => { event.preventDefault(); msdsDropZone.classList.remove("dragging"); }));
+  msdsDropZone?.addEventListener("drop", (event) => handleMsdsFileSelection(event.dataTransfer?.files?.[0]));
   $$('[data-goto]').forEach((button) => button.addEventListener("click", () => goToPage(button.dataset.goto)));
   $("#mobileMenu").addEventListener("click", () => document.body.classList.toggle("sidebar-open"));
   $("#sidebarScrim").addEventListener("click", () => document.body.classList.remove("sidebar-open"));

@@ -73,11 +73,34 @@ const SCHEMA = [
     clip_content_type TEXT,
     created_at TEXT NOT NULL
   )`,
+  `CREATE TABLE IF NOT EXISTS msds_documents (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    original_name TEXT NOT NULL,
+    manufacturer TEXT NOT NULL DEFAULT '',
+    keywords TEXT NOT NULL DEFAULT '',
+    content_type TEXT NOT NULL DEFAULT 'application/pdf',
+    byte_length INTEGER NOT NULL DEFAULT 0,
+    chunk_size INTEGER NOT NULL DEFAULT 245760,
+    chunk_count INTEGER NOT NULL DEFAULT 0,
+    uploaded_by TEXT NOT NULL DEFAULT 'admin',
+    uploaded_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS msds_chunks (
+    document_id TEXT NOT NULL,
+    chunk_index INTEGER NOT NULL,
+    bytes BLOB NOT NULL,
+    byte_length INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY(document_id, chunk_index)
+  )`,
   `CREATE TABLE IF NOT EXISTS app_settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL,
     updated_at TEXT NOT NULL
   )`,
+  `CREATE INDEX IF NOT EXISTS idx_msds_title ON msds_documents(title)`,
+  `CREATE INDEX IF NOT EXISTS idx_msds_uploaded ON msds_documents(uploaded_at DESC)`,
   `CREATE INDEX IF NOT EXISTS idx_training_device ON training_samples(device_id, captured_at DESC)`,
   `CREATE INDEX IF NOT EXISTS idx_stop_work_occurred ON stop_work_requests(occurred_at DESC)`,
   `CREATE INDEX IF NOT EXISTS idx_stop_work_device ON stop_work_requests(device_id, occurred_at DESC)`,
@@ -748,6 +771,148 @@ async function fetchKoshaSafetySearch(env, keyword) {
   return result;
 }
 
+
+/* ---------- Smart MSDS library ---------- */
+
+const MSDS_MAX_FILE_BYTES = 12 * 1024 * 1024;
+const MSDS_CHUNK_BYTES = 240 * 1024;
+const MSDS_SOFT_STORAGE_BYTES = 150 * 1024 * 1024;
+
+function safeFilename(value, fallback = "MSDS.pdf") {
+  const cleaned = String(value || "").replace(/[\r\n\\/]+/g, "_").replace(/[\u0000-\u001f\u007f]/g, "").trim();
+  return (cleaned || fallback).slice(0, 180);
+}
+
+function mapMsdsDocument(row) {
+  return {
+    id: row.id,
+    title: row.title,
+    originalName: row.original_name,
+    manufacturer: row.manufacturer || "",
+    keywords: row.keywords || "",
+    contentType: row.content_type || "application/pdf",
+    byteLength: Number(row.byte_length || 0),
+    chunkCount: Number(row.chunk_count || 0),
+    uploadedAt: row.uploaded_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+async function getMsdsStats(env) {
+  const row = await env.DB.prepare("SELECT COUNT(*) AS count, COALESCE(SUM(byte_length),0) AS total_bytes FROM msds_documents").first();
+  return { count: Number(row?.count || 0), totalBytes: Number(row?.total_bytes || 0), softLimitBytes: MSDS_SOFT_STORAGE_BYTES, maxFileBytes: MSDS_MAX_FILE_BYTES };
+}
+
+async function listMsdsDocuments(env, query = "") {
+  const q = String(query || "").trim().slice(0, 80);
+  let rows;
+  if (q) {
+    const like = `%${q}%`;
+    const compact = `%${q.replace(/\s+/g, "")}%`;
+    rows = await env.DB.prepare(`SELECT id,title,original_name,manufacturer,keywords,content_type,byte_length,chunk_count,uploaded_at,updated_at
+      FROM msds_documents
+      WHERE title LIKE ? COLLATE NOCASE OR original_name LIKE ? COLLATE NOCASE OR manufacturer LIKE ? COLLATE NOCASE OR keywords LIKE ? COLLATE NOCASE
+         OR REPLACE(title,' ','') LIKE ? COLLATE NOCASE OR REPLACE(keywords,' ','') LIKE ? COLLATE NOCASE
+      ORDER BY uploaded_at DESC LIMIT 200`)
+      .bind(like, like, like, like, compact, compact).all();
+  } else {
+    rows = await env.DB.prepare(`SELECT id,title,original_name,manufacturer,keywords,content_type,byte_length,chunk_count,uploaded_at,updated_at
+      FROM msds_documents ORDER BY uploaded_at DESC LIMIT 200`).all();
+  }
+  return { items: (rows.results || []).map(mapMsdsDocument), stats: await getMsdsStats(env) };
+}
+
+async function storeMsdsPdf(env, file, meta) {
+  const byteLength = Number(file?.size || 0);
+  if (!byteLength) throw new Error("빈 PDF 파일은 등록할 수 없습니다.");
+  if (byteLength > MSDS_MAX_FILE_BYTES) throw new Error("MSDS PDF는 파일 1개당 12MB 이하로 등록해주세요.");
+  const buffer = await file.arrayBuffer();
+  const bytes = new Uint8Array(buffer);
+  const signature = new TextDecoder().decode(bytes.slice(0, 5));
+  if (signature !== "%PDF-") throw new Error("올바른 PDF 파일인지 확인해주세요.");
+  const stats = await getMsdsStats(env);
+  if (stats.totalBytes + byteLength > MSDS_SOFT_STORAGE_BYTES) throw new Error("MSDS 권장 저장용량 150MB에 도달했습니다. 오래된 자료를 삭제하거나 R2 저장소 확장을 권장합니다.");
+
+  const id = randomId("msds");
+  const now = nowIso();
+  const chunkCount = Math.ceil(byteLength / MSDS_CHUNK_BYTES);
+  const statements = [
+    env.DB.prepare(`INSERT INTO msds_documents (id,title,original_name,manufacturer,keywords,content_type,byte_length,chunk_size,chunk_count,uploaded_by,uploaded_at,updated_at)
+      VALUES (?,?,?,?,?,'application/pdf',?,?,?,'admin',?,?)`)
+      .bind(id, meta.title, meta.originalName, meta.manufacturer, meta.keywords, byteLength, MSDS_CHUNK_BYTES, chunkCount, now, now),
+  ];
+  for (let index = 0; index < chunkCount; index += 1) {
+    const start = index * MSDS_CHUNK_BYTES;
+    const end = Math.min(byteLength, start + MSDS_CHUNK_BYTES);
+    const chunk = bytes.slice(start, end);
+    statements.push(env.DB.prepare("INSERT INTO msds_chunks (document_id,chunk_index,bytes,byte_length) VALUES (?,?,?,?)")
+      .bind(id, index, exactArrayBuffer(chunk), chunk.byteLength));
+  }
+  await env.DB.batch(statements);
+  return { id, byteLength, chunkCount };
+}
+
+function parseByteRange(rangeHeader, total) {
+  if (!rangeHeader || !/^bytes=\d*-\d*$/.test(rangeHeader)) return null;
+  const [rawStart, rawEnd] = rangeHeader.replace("bytes=", "").split("-");
+  if (!rawStart && !rawEnd) return null;
+  let start;
+  let end;
+  if (!rawStart) {
+    const suffix = Math.max(0, Number(rawEnd || 0));
+    start = Math.max(0, total - suffix);
+    end = total - 1;
+  } else {
+    start = Number(rawStart);
+    end = rawEnd ? Number(rawEnd) : total - 1;
+  }
+  if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || start > end || start >= total) return { invalid: true };
+  return { start, end: Math.min(total - 1, end) };
+}
+
+function concatChunks(rows) {
+  const parts = rows.map((row) => new Uint8Array(row.bytes || []));
+  const total = parts.reduce((sum, part) => sum + part.byteLength, 0);
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const part of parts) { out.set(part, offset); offset += part.byteLength; }
+  return out;
+}
+
+async function serveMsdsPdf(request, env, id) {
+  const doc = await env.DB.prepare("SELECT id,title,original_name,content_type,byte_length,chunk_size,chunk_count FROM msds_documents WHERE id=?").bind(id).first();
+  if (!doc) return error("MSDS 자료를 찾을 수 없습니다.", 404);
+  const total = Number(doc.byte_length || 0);
+  const chunkSize = Number(doc.chunk_size || MSDS_CHUNK_BYTES);
+  const range = parseByteRange(request.headers.get("range"), total);
+  const filename = safeFilename(doc.original_name || `${doc.title || "MSDS"}.pdf`);
+  const download = new URL(request.url).searchParams.get("download") === "1";
+  const commonHeaders = {
+    "content-type": "application/pdf",
+    "cache-control": "private, no-store",
+    "accept-ranges": "bytes",
+    "content-disposition": `${download ? "attachment" : "inline"}; filename*=UTF-8''${encodeURIComponent(filename)}`,
+    "x-msds-storage": "d1-chunked",
+  };
+  if (range?.invalid) return new Response(null, { status: 416, headers: { ...commonHeaders, "content-range": `bytes */${total}` } });
+
+  if (range) {
+    const firstChunk = Math.floor(range.start / chunkSize);
+    const lastChunk = Math.floor(range.end / chunkSize);
+    const rows = await env.DB.prepare("SELECT chunk_index,bytes FROM msds_chunks WHERE document_id=? AND chunk_index BETWEEN ? AND ? ORDER BY chunk_index")
+      .bind(id, firstChunk, lastChunk).all();
+    const combined = concatChunks(rows.results || []);
+    const relativeStart = range.start - firstChunk * chunkSize;
+    const body = combined.slice(relativeStart, relativeStart + (range.end - range.start + 1));
+    return new Response(body, { status: 206, headers: { ...commonHeaders, "content-length": String(body.byteLength), "content-range": `bytes ${range.start}-${range.end}/${total}` } });
+  }
+
+  const rows = await env.DB.prepare("SELECT chunk_index,bytes FROM msds_chunks WHERE document_id=? ORDER BY chunk_index").bind(id).all();
+  const body = concatChunks(rows.results || []);
+  return new Response(body, { status: 200, headers: { ...commonHeaders, "content-length": String(body.byteLength) } });
+}
+
+
 /* ---------- API ---------- */
 
 async function handleAuth(request, env) {
@@ -825,6 +990,49 @@ async function handleApi(request, env, ctx) {
       console.warn("safety-law search failed", searchError?.message || searchError);
       return error(searchError?.message || "안전보건법령 검색에 실패했습니다.", 502);
     }
+  }
+
+  if (path === "/api/msds" && method === "GET") {
+    const query = String(url.searchParams.get("q") || "").trim();
+    return json({ ok: true, data: await listMsdsDocuments(env, query) });
+  }
+
+  if (path === "/api/msds" && method === "POST") {
+    if (!isAdmin) return error("MSDS 업로드는 관리자 권한이 필요합니다.", 403);
+    const contentType = request.headers.get("content-type") || "";
+    if (!contentType.includes("multipart/form-data")) return error("MSDS 업로드는 multipart/form-data 형식이어야 합니다.");
+    const form = await request.formData();
+    const file = form.get("file");
+    if (!file || typeof file.arrayBuffer !== "function") return error("등록할 PDF 파일을 선택해주세요.");
+    const originalName = safeFilename(file.name || "MSDS.pdf");
+    const title = String(form.get("title") || originalName.replace(/\.pdf$/i, "")).trim().slice(0, 120);
+    const manufacturer = String(form.get("manufacturer") || "").trim().slice(0, 120);
+    const keywords = String(form.get("keywords") || "").trim().slice(0, 240);
+    if (!title) return error("물질명 또는 제품명을 입력해주세요.");
+    try {
+      const result = await storeMsdsPdf(env, file, { title, originalName, manufacturer, keywords });
+      return json({ ok: true, data: { ...result, stats: await getMsdsStats(env) } }, 201);
+    } catch (uploadError) {
+      console.warn("msds upload failed", uploadError?.message || uploadError);
+      const status = /12MB|150MB|PDF/.test(uploadError?.message || "") ? 413 : 500;
+      return error(uploadError?.message || "MSDS 자료를 저장하지 못했습니다.", status);
+    }
+  }
+
+  const msdsFileMatch = path.match(/^\/api\/msds\/([^/]+)\/file$/);
+  if (msdsFileMatch && method === "GET") return serveMsdsPdf(request, env, decodeURIComponent(msdsFileMatch[1]));
+
+  const msdsDeleteMatch = path.match(/^\/api\/msds\/([^/]+)$/);
+  if (msdsDeleteMatch && method === "DELETE") {
+    if (!isAdmin) return error("MSDS 삭제는 관리자 권한이 필요합니다.", 403);
+    const id = decodeURIComponent(msdsDeleteMatch[1]);
+    const doc = await env.DB.prepare("SELECT id FROM msds_documents WHERE id=?").bind(id).first();
+    if (!doc) return error("MSDS 자료를 찾을 수 없습니다.", 404);
+    await env.DB.batch([
+      env.DB.prepare("DELETE FROM msds_chunks WHERE document_id=?").bind(id),
+      env.DB.prepare("DELETE FROM msds_documents WHERE id=?").bind(id),
+    ]);
+    return json({ ok: true, data: { id, deleted: true, stats: await getMsdsStats(env) } });
   }
 
   if (path === "/api/stop-work" && method === "POST") {
