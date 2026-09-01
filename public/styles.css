@@ -167,9 +167,13 @@ code { color: #a8ebea; font-family: Consolas, monospace; }
 .core-ring { position: absolute; left: 138px; top: 83px; z-index: 3; width: 58px; height: 58px; display: grid; place-items: center; border: 1px solid var(--cyan); border-radius: 50%; background: #092532; box-shadow: 0 0 30px rgba(89,224,220,.55); }
 .core-ring span { color: var(--cyan); font-weight: 800; }
 .kpi-grid { display: grid; grid-template-columns: repeat(5, minmax(150px, 1fr)); gap: 16px; margin-bottom: 22px; }
-.kpi-card { padding: 20px 22px; border: 1px solid var(--line); border-radius: 18px; background: var(--panel); }
+.kpi-card { width:100%; padding:20px 22px; border:1px solid var(--line); border-radius:18px; background:var(--panel); color:inherit; text-align:left; cursor:pointer; transition:border-color .16s ease, transform .16s ease, background .16s ease; }
+.kpi-card:hover,.kpi-card:focus-visible { border-color:var(--cyan); background:rgba(12,42,55,.96); transform:translateY(-2px); outline:none; }
+.kpi-card.stop-work-kpi { border-color:rgba(255,73,96,.34); background:linear-gradient(145deg, rgba(62,12,25,.78), rgba(7,25,35,.94)); }
 .kpi-card b { display: block; font-size: 34px; letter-spacing: -.05em; }
-.kpi-card span { display: block; margin-top: 8px; color: var(--muted); font-size: 13px; }
+.kpi-card span { display:block; margin-top:8px; color:var(--muted); font-size:13px; }
+.kpi-card small { display:block; margin-top:10px; color:#5f8794; font-size:10px; }
+.kpi-card.stop-work-kpi b { color:#ff8c9b; }
 .dashboard-grid { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(300px, .8fr); gap: 22px; }
 .dashboard-grid > .panel { padding: 24px; }
 .panel-large { min-width: 0; }
@@ -752,6 +756,12 @@ button, .top-action, .icon-button, .table-action { min-height: 42px; }
   background: #000;
 }
 .media-viewer-note { margin: 12px 0 0; color: var(--muted); font-size: 12px; line-height: 1.55; }
+.stop-work-video-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; align-items:start; }
+.stop-work-video-pane { min-width:0; }
+.stop-work-video-pane > span { display:inline-flex; margin:0 0 8px; padding:5px 9px; border:1px solid var(--line); border-radius:999px; color:#b9d7df; font-size:11px; }
+.event-video-button { appearance:none; border:0; padding:0; background:none; color:var(--cyan); font:inherit; cursor:pointer; text-decoration:underline; text-underline-offset:3px; }
+@media (max-width:760px) { .stop-work-video-grid { grid-template-columns:1fr; } }
+
 
 /* User danger-zone editor */
 .guard-zone-editor-panel {

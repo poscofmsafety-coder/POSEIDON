@@ -107,7 +107,7 @@
               <div class="event-list" id="overviewEvents"></div>
             </article>
             <article class="panel">
-              <div class="panel-header"><div><p class="eyebrow">TODAY BY CATEGORY</p><h3>오늘의 위험 유형</h3></div></div>
+              <div class="panel-header"><div><p class="eyebrow">LAST 24 HOURS BY CATEGORY</p><h3>최근 24시간 위험 유형</h3></div></div>
               <div class="category-chart" id="categoryChart"></div>
             </article>
           </div>
@@ -268,7 +268,7 @@
             <div class="event-retention-actions"><button class="primary-button" id="saveEventRetention" type="button">보관설정 저장</button><button class="secondary-button" id="cleanupEventsNow" type="button">지난 데이터 지금 정리</button><button class="secondary-button danger-button" id="deleteAllEvents" type="button">이벤트 전체 삭제</button></div>
             <small id="eventRetentionStats">보관정보 조회 중...</small>
           </div>
-          <div class="filter-bar panel"><select id="eventDeviceFilter"><option value="">전체 장치</option></select><select id="eventCategoryFilter"><option value="">전체 유형</option><option>위험구역</option><option>보호구</option><option>불안전 행동</option><option>작업환경</option><option>중장비</option><option>작업중지권</option></select><select id="eventSeverityFilter"><option value="">전체 등급</option><option value="critical">긴급</option><option value="high">위험</option><option value="medium">주의</option></select><button class="primary-button" id="applyEventFilter" type="button">조회</button></div>
+          <div class="filter-bar panel"><select id="eventTimeFilter"><option value="">전체 기간</option><option value="24h">최근 24시간</option><option value="7d">최근 7일</option></select><select id="eventDeviceFilter"><option value="">전체 장치</option></select><select id="eventCategoryFilter"><option value="">전체 유형</option><option>위험구역</option><option>보호구</option><option>불안전 행동</option><option>작업환경</option><option>중장비</option><option>작업중지권</option></select><select id="eventSeverityFilter"><option value="">전체 등급</option><option value="highplus">고위험 이상</option><option value="critical">긴급</option><option value="high">위험</option><option value="medium">주의</option></select><select id="eventStatusFilter"><option value="">전체 상태</option><option value="pending">관리자 조치 필요</option><option value="done">확인 완료</option></select><button class="primary-button" id="applyEventFilter" type="button">조회</button></div>
           <div class="panel table-panel"><table class="data-table"><thead><tr><th>발생시간</th><th>장치</th><th>유형</th><th>등급</th><th>내용</th><th>상태</th><th>조치</th></tr></thead><tbody id="eventTableBody"></tbody></table></div>
         </section>
 
@@ -323,8 +323,11 @@
         <button class="modal-close" id="stopWorkVideoClose" type="button" aria-label="닫기">×</button>
         <p class="eyebrow">STOP-WORK INCIDENT RECORD</p>
         <h2 id="stopWorkVideoTitle">작업중지 전후 영상</h2>
-        <div class="stop-work-video-frame"><video id="stopWorkVideoPlayer" controls playsinline preload="metadata"></video></div>
-        <p class="media-viewer-note">작업중지권 발동 전 최대 10초와 발동 후 약 10초 기록입니다.</p>
+        <div class="stop-work-video-grid">
+          <section class="stop-work-video-pane" id="stopWorkBeforePane"><span>발동 전</span><div class="stop-work-video-frame"><video id="stopWorkBeforePlayer" controls playsinline preload="metadata"></video></div></section>
+          <section class="stop-work-video-pane" id="stopWorkAfterPane"><span>발동 후</span><div class="stop-work-video-frame"><video id="stopWorkAfterPlayer" controls playsinline preload="metadata"></video></div></section>
+        </div>
+        <p class="media-viewer-note">영상 깨짐을 줄이기 위해 발동 전·후를 각각 완전한 영상 파일로 기록합니다.</p>
       </section>
     </div>
 
@@ -341,6 +344,6 @@
     <div class="sidebar-scrim" id="sidebarScrim"></div>
 
     <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js" defer></script>
-    <script type="module" src="/app.js?v=6.1.0"></script>
+    <script type="module" src="/app.js?v=6.4.0"></script>
   </body>
 </html>

@@ -196,13 +196,18 @@ const callState = {
 };
 
 const stopWorkState = {
-  recorder: null,
-  mimeType: "",
-  rollingChunks: [],
-  headerChunk: null,
+  preRecorder: null,
+  preStream: null,
+  preChunks: [],
+  preStartedAt: 0,
+  preRotateTimer: null,
+  lastBeforeBlob: null,
+  lastBeforeDurationMs: 0,
+  postRecorder: null,
+  postStream: null,
   incident: null,
   countdownTimer: null,
-  maxPreMs: 10500,
+  segmentMs: 10000,
 };
 
 const guardZoneEditor = {
@@ -404,13 +409,44 @@ async function loadDashboard(silent = false) {
 function renderKpis() {
   const s = state.summary || {};
   const cards = [
-    [`${s.online || 0}/${s.totalDevices || 0}`, "정상 연결"],
-    [s.people || 0, "AI 감지 인원"],
-    [s.todayEvents || 0, "최근 24시간"],
-    [s.highRisk || 0, "고위험 이벤트"],
-    [s.unacknowledged || 0, "관리자 조치 필요"],
+    { value: `${s.online || 0}/${s.totalDevices || 0}`, label: "정상 연결", target: "online" },
+    { value: s.people || 0, label: "AI 감지 인원", target: "people" },
+    { value: s.highRisk || 0, label: "고위험 이벤트", target: "high-risk" },
+    { value: s.stopWork || 0, label: "작업중지권 발동", target: "stop-work", danger: true },
+    { value: s.unacknowledged || 0, label: "관리자 조치 필요", target: "pending" },
   ];
-  $("#kpiGrid").innerHTML = cards.map(([value, label]) => `<article class="kpi-card"><b>${escapeHtml(value)}</b><span>${escapeHtml(label)}</span></article>`).join("");
+  const grid = $("#kpiGrid");
+  grid.innerHTML = cards.map((card) => `<button class="kpi-card${card.danger ? " stop-work-kpi" : ""}" type="button" data-kpi-target="${escapeHtml(card.target)}" aria-label="${escapeHtml(card.label)} 데이터 보기"><b>${escapeHtml(card.value)}</b><span>${escapeHtml(card.label)}</span><small>클릭하여 상세 보기 →</small></button>`).join("");
+  $$('[data-kpi-target]', grid).forEach((button) => button.addEventListener("click", () => openKpiDrilldown(button.dataset.kpiTarget)));
+}
+
+function resetEventFilters() {
+  if ($("#eventDeviceFilter")) $("#eventDeviceFilter").value = "";
+  if ($("#eventCategoryFilter")) $("#eventCategoryFilter").value = "";
+  if ($("#eventSeverityFilter")) $("#eventSeverityFilter").value = "";
+  if ($("#eventStatusFilter")) $("#eventStatusFilter").value = "";
+  if ($("#eventTimeFilter")) $("#eventTimeFilter").value = "";
+}
+
+function openKpiDrilldown(target) {
+  if (target === "online" || target === "people") {
+    goToPage("live");
+    setTimeout(() => document.querySelector("#liveDevices")?.scrollIntoView({ behavior: "smooth", block: "start" }), 80);
+    return;
+  }
+  goToPage("events");
+  resetEventFilters();
+  if (target === "high-risk") {
+    if ($("#eventSeverityFilter")) $("#eventSeverityFilter").value = "highplus";
+    if ($("#eventStatusFilter")) $("#eventStatusFilter").value = "pending";
+  }
+  if (target === "stop-work") {
+    if ($("#eventCategoryFilter")) $("#eventCategoryFilter").value = "작업중지권";
+    if ($("#eventStatusFilter")) $("#eventStatusFilter").value = "pending";
+  }
+  if (target === "pending" && $("#eventStatusFilter")) $("#eventStatusFilter").value = "pending";
+  renderEventTable();
+  setTimeout(() => document.querySelector("#eventTableBody")?.closest(".table-panel")?.scrollIntoView({ behavior: "smooth", block: "start" }), 80);
 }
 
 function deviceCardMarkup(device, live) {
@@ -528,10 +564,27 @@ function renderEventTable() {
   const deviceFilter = $("#eventDeviceFilter")?.value || "";
   const categoryFilter = $("#eventCategoryFilter")?.value || "";
   const severityFilter = $("#eventSeverityFilter")?.value || "";
-  const items = state.events.filter((event) => (!deviceFilter || event.deviceId === deviceFilter) && (!categoryFilter || event.category === categoryFilter) && (!severityFilter || event.severity === severityFilter));
+  const statusFilter = $("#eventStatusFilter")?.value || "";
+  const timeFilter = $("#eventTimeFilter")?.value || "";
+  const now = Date.now();
+  const cutoff = timeFilter === "24h" ? now - 86400000 : timeFilter === "7d" ? now - 7 * 86400000 : 0;
+  const items = state.events.filter((event) => {
+    const eventTime = new Date(event.occurredAt).getTime();
+    const severityOk = !severityFilter || (severityFilter === "highplus" ? ["high", "critical"].includes(event.severity) : event.severity === severityFilter);
+    const statusOk = !statusFilter || (statusFilter === "pending" ? !event.acknowledged : statusFilter === "done" ? Boolean(event.acknowledged) : true);
+    return (!deviceFilter || event.deviceId === deviceFilter)
+      && (!categoryFilter || event.category === categoryFilter)
+      && severityOk
+      && statusOk
+      && (!cutoff || eventTime >= cutoff);
+  });
   body.innerHTML = items.map((event) => `<tr class="${event.type === "STOP_WORK_REQUEST" ? "stop-work-event-row" : ""}"><td>${formatDate(event.occurredAt)}</td><td>${escapeHtml(event.deviceName)}</td><td>${escapeHtml(event.category)}</td><td><span class="severity-pill ${escapeHtml(event.severity)}">${severityLabel(event.severity)}</span></td><td>${eventMessageHtml(event)}</td><td>${escapeHtml(event.status)}</td><td><div class="event-actions">${event.acknowledged ? "<span>완료</span>" : `<button class="table-action" data-event-ack="${escapeHtml(event.id)}">확인 완료</button>`}<button class="table-action danger-action" data-event-delete="${escapeHtml(event.id)}">삭제</button></div></td></tr>`).join("") || `<tr><td colspan="7">조회된 이벤트가 없습니다.</td></tr>`;
   $$('[data-event-ack]', body).forEach((button) => button.addEventListener("click", () => acknowledgeEvent(button.dataset.eventAck)));
   $$('[data-event-delete]', body).forEach((button) => button.addEventListener("click", () => deleteEvent(button.dataset.eventDelete)));
+  $$('[data-event-stop-video]', body).forEach((button) => button.addEventListener("click", () => {
+    const event = state.events.find((item) => item.id === button.dataset.eventStopVideo);
+    if (event) openStopWorkVideo(event.metadata?.beforeClipUrl, event.metadata?.afterClipUrl, event.metadata?.clipUrl);
+  }));
 }
 
 function renderCategoryChart() {
@@ -545,7 +598,7 @@ function renderBriefing() {
   const s = state.summary || {};
   const top = Object.entries(s.categoryCounts || {}).sort((a, b) => b[1] - a[1])[0];
   const main = s.highRisk > 0 ? `현재 <b>${s.highRisk}건의 고위험 이벤트</b>가 확인되었습니다. 현장 무전과 이벤트 확인 기능을 이용해 조치 여부를 점검하세요.` : `현재 연결된 현장은 <b>안정 상태</b>입니다. 실시간 영상과 보호구 AI가 지속적으로 현장을 확인합니다.`;
-  const points = [top ? `오늘 가장 많이 발생한 유형은 ‘${top[0]}’ ${top[1]}건입니다.` : "오늘 누적 이벤트가 없습니다.", `${s.online || 0}대의 현장 지킴이가 중앙 관제에 연결되어 있습니다.`, s.unacknowledged ? `확인이 필요한 이벤트가 ${s.unacknowledged}건 남아 있습니다.` : "모든 이벤트가 확인된 상태입니다."];
+  const points = [top ? `최근 24시간 가장 많이 발생한 유형은 ‘${top[0]}’ ${top[1]}건입니다.` : "최근 24시간 누적 이벤트가 없습니다.", `${s.online || 0}대의 현장 지킴이가 중앙 관제에 연결되어 있습니다.`, s.unacknowledged ? `확인이 필요한 이벤트가 ${s.unacknowledged}건 남아 있습니다.` : "모든 이벤트가 확인된 상태입니다."];
   $("#aiBriefing").innerHTML = `<div class="brief-main">${main}</div><div class="ai-points">${points.map((point) => `<div class="ai-point"><i></i><span>${escapeHtml(point)}</span></div>`).join("")}</div>`;
 }
 
@@ -2325,59 +2378,130 @@ function chooseStopWorkMimeType() {
   return candidates.find((type) => MediaRecorder.isTypeSupported?.(type)) || "";
 }
 
+function createStopWorkRecorder(onFinished) {
+  if (!guard.stream || !("MediaRecorder" in window)) return null;
+  const videoTracks = guard.stream.getVideoTracks().filter((track) => track.readyState === "live");
+  if (!videoTracks.length) return null;
+  const stream = new MediaStream(videoTracks.map((track) => track.clone()));
+  const mimeType = chooseStopWorkMimeType();
+  const chunks = [];
+  const startedAt = Date.now();
+  try {
+    const recorder = new MediaRecorder(stream, {
+      videoBitsPerSecond: isMobile() ? 220000 : 320000,
+      ...(mimeType ? { mimeType } : {}),
+    });
+    recorder.ondataavailable = (event) => { if (event.data?.size) chunks.push(event.data); };
+    recorder.onerror = (event) => console.warn("stop-work recorder", event?.error || event);
+    recorder.onstop = () => {
+      const durationMs = Math.max(0, Date.now() - startedAt);
+      const type = recorder.mimeType || mimeType || chunks[0]?.type || "video/webm";
+      const blob = chunks.length ? new Blob(chunks, { type }) : null;
+      stream.getTracks().forEach((track) => track.stop());
+      onFinished?.({ blob, durationMs, type });
+    };
+    recorder.start();
+    return { recorder, stream, startedAt };
+  } catch (error) {
+    stream.getTracks().forEach((track) => track.stop());
+    console.warn("stop-work recorder start", error);
+    return null;
+  }
+}
+
+function startStopWorkPreSegment() {
+  if (!guard.active || stopWorkState.incident) return;
+  clearTimeout(stopWorkState.preRotateTimer);
+  const pack = createStopWorkRecorder(({ blob, durationMs }) => {
+    stopWorkState.preRecorder = null;
+    stopWorkState.preStream = null;
+    if (blob?.size) {
+      stopWorkState.lastBeforeBlob = blob;
+      stopWorkState.lastBeforeDurationMs = durationMs;
+    }
+    if (guard.active && !stopWorkState.incident) startStopWorkPreSegment();
+  });
+  if (!pack) {
+    updateStopWorkRecordStatus("이 브라우저는 작업중지 사전 영상 기록을 지원하지 않습니다. 사유와 현장 사진은 정상 전송됩니다.", "warn");
+    return;
+  }
+  stopWorkState.preRecorder = pack.recorder;
+  stopWorkState.preStream = pack.stream;
+  stopWorkState.preStartedAt = pack.startedAt;
+  stopWorkState.preRotateTimer = setTimeout(() => {
+    if (stopWorkState.preRecorder?.state === "recording" && !stopWorkState.incident) {
+      try { stopWorkState.preRecorder.stop(); } catch { /* noop */ }
+    }
+  }, stopWorkState.segmentMs);
+}
+
 function startStopWorkRollingBuffer() {
   stopStopWorkRollingBuffer(false);
   if (!guard.stream || !("MediaRecorder" in window)) {
-    updateStopWorkRecordStatus("이 브라우저는 사전 영상 버퍼를 지원하지 않습니다. 요청 내용은 정상 전송됩니다.");
+    updateStopWorkRecordStatus("이 브라우저는 사전 영상 버퍼를 지원하지 않습니다. 요청 내용은 정상 전송됩니다.", "warn");
     return;
   }
-  const videoTracks = guard.stream.getVideoTracks().filter((track) => track.readyState === "live");
-  if (!videoTracks.length) return;
-  try {
-    const mimeType = chooseStopWorkMimeType();
-    const recorderStream = new MediaStream(videoTracks.map((track) => track.clone()));
-    const options = {
-      videoBitsPerSecond: isMobile() ? 180000 : 260000,
-      ...(mimeType ? { mimeType } : {}),
-    };
-    const recorder = new MediaRecorder(recorderStream, options);
-    stopWorkState.recorder = recorder;
-    stopWorkState.mimeType = recorder.mimeType || mimeType || "video/webm";
-    stopWorkState.rollingChunks = [];
-    stopWorkState.headerChunk = null;
-    recorder.ondataavailable = (event) => {
-      if (!event.data?.size) return;
-      const now = Date.now();
-      if (!stopWorkState.headerChunk) stopWorkState.headerChunk = event.data;
-      const entry = { at: now, blob: event.data };
-      stopWorkState.rollingChunks.push(entry);
-      stopWorkState.rollingChunks = stopWorkState.rollingChunks.filter((item) => item.at >= now - stopWorkState.maxPreMs);
-      if (stopWorkState.incident && now >= stopWorkState.incident.clickedAt) {
-        stopWorkState.incident.postChunks.push(event.data);
-      }
-    };
-    recorder.onerror = (event) => {
-      console.warn("stop-work recorder", event?.error || event);
-      updateStopWorkRecordStatus("사전 영상 기록을 사용할 수 없습니다. 작업중지 요청은 계속 가능합니다.");
-    };
-    recorder.onstop = () => recorderStream.getTracks().forEach((track) => track.stop());
-    recorder.start(1000);
-  } catch (error) {
-    console.warn("stop-work rolling buffer start", error);
-    stopWorkState.recorder = null;
-  }
+  startStopWorkPreSegment();
 }
 
 function stopStopWorkRollingBuffer(clearIncident = true) {
   clearInterval(stopWorkState.countdownTimer);
+  clearTimeout(stopWorkState.preRotateTimer);
   stopWorkState.countdownTimer = null;
-  if (stopWorkState.recorder && stopWorkState.recorder.state !== "inactive") {
-    try { stopWorkState.recorder.stop(); } catch { /* noop */ }
+  stopWorkState.preRotateTimer = null;
+  for (const recorder of [stopWorkState.preRecorder, stopWorkState.postRecorder]) {
+    if (recorder && recorder.state !== "inactive") {
+      try { recorder.stop(); } catch { /* noop */ }
+    }
   }
-  stopWorkState.recorder = null;
-  stopWorkState.rollingChunks = [];
-  stopWorkState.headerChunk = null;
+  stopWorkState.preRecorder = null;
+  stopWorkState.postRecorder = null;
+  stopWorkState.preStream?.getTracks().forEach((track) => track.stop());
+  stopWorkState.postStream?.getTracks().forEach((track) => track.stop());
+  stopWorkState.preStream = null;
+  stopWorkState.postStream = null;
+  stopWorkState.lastBeforeBlob = null;
+  stopWorkState.lastBeforeDurationMs = 0;
   if (clearIncident) stopWorkState.incident = null;
+}
+
+function startStopWorkPostRecording() {
+  const incident = stopWorkState.incident;
+  if (!incident) return;
+  const pack = createStopWorkRecorder(({ blob, durationMs }) => {
+    stopWorkState.postRecorder = null;
+    stopWorkState.postStream = null;
+    if (!stopWorkState.incident || stopWorkState.incident !== incident) return;
+    incident.afterClip = blob?.size ? blob : null;
+    incident.afterDurationMs = durationMs;
+    incident.recording = false;
+    clearInterval(stopWorkState.countdownTimer);
+    stopWorkState.countdownTimer = null;
+    const beforeText = incident.beforeClip ? `전 ${Math.max(1, Math.round((incident.beforeDurationMs || 0) / 1000))}초` : "전 영상 없음";
+    const afterText = incident.afterClip ? `후 ${Math.max(1, Math.round((incident.afterDurationMs || 0) / 1000))}초` : "후 영상 없음";
+    updateStopWorkRecordStatus(`영상 준비 완료 · ${beforeText} / ${afterText}`, incident.beforeClip || incident.afterClip ? "ready" : "warn");
+    $("#submitStopWork").disabled = false;
+  });
+  if (!pack) {
+    incident.recording = false;
+    updateStopWorkRecordStatus("사후 영상 기록을 시작하지 못했습니다. 사유와 현장 사진은 전송할 수 있습니다.", "warn");
+    $("#submitStopWork").disabled = false;
+    return;
+  }
+  stopWorkState.postRecorder = pack.recorder;
+  stopWorkState.postStream = pack.stream;
+  let remaining = 10;
+  updateStopWorkRecordStatus(`발동 전 영상 확보 · 발동 후 ${remaining}초 기록 중`, "recording");
+  clearInterval(stopWorkState.countdownTimer);
+  stopWorkState.countdownTimer = setInterval(() => {
+    remaining -= 1;
+    if (remaining > 0) updateStopWorkRecordStatus(`발동 전 영상 확보 · 발동 후 ${remaining}초 기록 중`, "recording");
+  }, 1000);
+  setTimeout(() => {
+    if (stopWorkState.postRecorder === pack.recorder && pack.recorder.state === "recording") {
+      try { pack.recorder.stop(); } catch { /* noop */ }
+    }
+  }, 10000);
 }
 
 function updateStopWorkRecordStatus(text, tone = "") {
@@ -2399,61 +2523,72 @@ function beginStopWorkRequest() {
   $("#submitStopWork").disabled = true;
 
   const clickedAt = Date.now();
-  const preEntries = stopWorkState.rollingChunks.filter((item) => item.at >= clickedAt - 10000);
-  stopWorkState.incident = {
+  const incident = stopWorkState.incident = {
     clickedAt,
-    preChunks: preEntries.map((item) => item.blob),
-    postChunks: [],
-    clip: null,
-    recording: Boolean(stopWorkState.recorder && stopWorkState.recorder.state === "recording"),
+    beforeClip: null,
+    beforeDurationMs: 0,
+    afterClip: null,
+    afterDurationMs: 0,
+    recording: true,
     snapshotBase64: captureGuardSnapshot(0.62, 840),
   };
 
-  if (!stopWorkState.incident.recording) {
-    updateStopWorkRecordStatus("영상 버퍼를 사용할 수 없어 사유만 즉시 전송할 수 있습니다.", "warn");
-    $("#submitStopWork").disabled = false;
-    return;
-  }
+  clearTimeout(stopWorkState.preRotateTimer);
+  stopWorkState.preRotateTimer = null;
+  const currentDuration = Math.max(0, clickedAt - (stopWorkState.preStartedAt || clickedAt));
+  const previousBlob = stopWorkState.lastBeforeBlob;
+  const previousDuration = stopWorkState.lastBeforeDurationMs;
+  const currentRecorder = stopWorkState.preRecorder;
 
-  let remaining = 10;
-  updateStopWorkRecordStatus(`버튼 누르기 전 최대 10초 확보 · 이후 영상 ${remaining}초 기록 중`, "recording");
-  clearInterval(stopWorkState.countdownTimer);
-  stopWorkState.countdownTimer = setInterval(() => {
-    remaining -= 1;
-    if (remaining > 0) updateStopWorkRecordStatus(`버튼 누르기 전 최대 10초 확보 · 이후 영상 ${remaining}초 기록 중`, "recording");
-  }, 1000);
-  setTimeout(finalizeStopWorkClip, 10000);
-}
-
-function finalizeStopWorkClip() {
-  clearInterval(stopWorkState.countdownTimer);
-  stopWorkState.countdownTimer = null;
-  const incident = stopWorkState.incident;
-  if (!incident) return;
-  incident.recording = false;
-  const chunks = [...incident.preChunks, ...incident.postChunks];
-  if (stopWorkState.headerChunk && chunks.length && !chunks.includes(stopWorkState.headerChunk)) chunks.unshift(stopWorkState.headerChunk);
-  if (chunks.length) {
-    let clip = new Blob(chunks, { type: stopWorkState.mimeType || chunks[0]?.type || "video/webm" });
-    // D1 이벤트 미디어 저장 공간을 보호하기 위해 1.4MB 안에서 업로드합니다.
-    if (clip.size <= 1_400_000) {
-      incident.clip = clip;
-      updateStopWorkRecordStatus(`사고 전·후 영상 준비 완료 · ${formatTrainingBytes(clip.size)}`, "ready");
-    } else {
-      incident.clip = null;
-      updateStopWorkRecordStatus(`영상이 ${formatTrainingBytes(clip.size)}로 커서 서버 저장은 생략됩니다. 사유와 스냅숏은 전송됩니다.`, "warn");
-    }
+  if (currentRecorder && currentRecorder.state === "recording") {
+    const currentStream = stopWorkState.preStream;
+    const currentStartedAt = stopWorkState.preStartedAt;
+    const chunks = [];
+    // Rebind handlers so stopping the current segment yields one valid standalone media file.
+    currentRecorder.ondataavailable = (event) => { if (event.data?.size) chunks.push(event.data); };
+    currentRecorder.onstop = () => {
+      const durationMs = Math.max(0, Date.now() - currentStartedAt);
+      const type = currentRecorder.mimeType || chooseStopWorkMimeType() || chunks[0]?.type || "video/webm";
+      const currentBlob = chunks.length ? new Blob(chunks, { type }) : null;
+      currentStream?.getTracks().forEach((track) => track.stop());
+      stopWorkState.preRecorder = null;
+      stopWorkState.preStream = null;
+      // 클릭 직후라 현재 조각이 너무 짧으면 직전의 완성된 약 10초 파일을 사용합니다.
+      if (currentBlob?.size && durationMs >= 2200) {
+        incident.beforeClip = currentBlob;
+        incident.beforeDurationMs = durationMs;
+      } else if (previousBlob?.size) {
+        incident.beforeClip = previousBlob;
+        incident.beforeDurationMs = previousDuration;
+      } else if (currentBlob?.size) {
+        incident.beforeClip = currentBlob;
+        incident.beforeDurationMs = durationMs;
+      }
+      startStopWorkPostRecording();
+    };
+    try { currentRecorder.stop(); } catch { startStopWorkPostRecording(); }
   } else {
-    updateStopWorkRecordStatus("영상 기록은 없지만 사유와 현재 화면은 전송할 수 있습니다.", "warn");
+    if (previousBlob?.size) {
+      incident.beforeClip = previousBlob;
+      incident.beforeDurationMs = previousDuration || currentDuration;
+    }
+    startStopWorkPostRecording();
   }
-  $("#submitStopWork").disabled = false;
 }
 
 function closeStopWorkModal() {
   clearInterval(stopWorkState.countdownTimer);
   stopWorkState.countdownTimer = null;
+  const postRecorder = stopWorkState.postRecorder;
   stopWorkState.incident = null;
+  if (postRecorder && postRecorder.state !== "inactive") {
+    try { postRecorder.stop(); } catch { /* noop */ }
+  }
+  stopWorkState.postRecorder = null;
+  stopWorkState.postStream?.getTracks().forEach((track) => track.stop());
+  stopWorkState.postStream = null;
   $("#stopWorkModal").hidden = true;
+  if (guard.active && !stopWorkState.preRecorder) setTimeout(startStopWorkPreSegment, 80);
 }
 
 async function submitStopWorkRequest() {
@@ -2477,9 +2612,13 @@ async function submitStopWorkRequest() {
     form.append("reason", reason);
     form.append("occurredAt", new Date(incident.clickedAt).toISOString());
     if (incident.snapshotBase64) form.append("snapshotBase64", incident.snapshotBase64);
-    if (incident.clip) {
-      const ext = (incident.clip.type || "").includes("mp4") ? "mp4" : "webm";
-      form.append("clip", incident.clip, `stop-work-${Date.now()}.${ext}`);
+    if (incident.beforeClip) {
+      const ext = (incident.beforeClip.type || "").includes("mp4") ? "mp4" : "webm";
+      form.append("beforeClip", incident.beforeClip, `stop-work-before-${Date.now()}.${ext}`);
+    }
+    if (incident.afterClip) {
+      const ext = (incident.afterClip.type || "").includes("mp4") ? "mp4" : "webm";
+      form.append("afterClip", incident.afterClip, `stop-work-after-${Date.now()}.${ext}`);
     }
     const result = await api("/api/stop-work", { method: "POST", body: form });
     localStorage.setItem("poseidon-stop-work-reporter", JSON.stringify({ name: reporterName, contact: reporterContact }));
@@ -2500,7 +2639,8 @@ async function submitStopWorkRequest() {
 function eventMessageHtml(event) {
   const links = [];
   if (event.snapshotUrl) links.push(`<a href="${escapeHtml(event.snapshotUrl)}" target="_blank" rel="noopener">현장 사진</a>`);
-  if (event.metadata?.clipUrl) links.push(`<a href="${escapeHtml(event.metadata.clipUrl)}" target="_blank" rel="noopener">전후 영상</a>`);
+  const hasStopWorkVideo = Boolean(event.metadata?.beforeClipUrl || event.metadata?.afterClipUrl || event.metadata?.clipUrl);
+  if (hasStopWorkVideo) links.push(`<button class="event-video-button" type="button" data-event-stop-video="${escapeHtml(event.id)}">전후 영상</button>`);
   const details = event.type === "STOP_WORK_REQUEST"
     ? `<small class="stop-work-event-detail">발동자 ${escapeHtml(event.metadata?.reporterName || "-")} · ${escapeHtml(event.metadata?.reporterContact || "연락처 미입력")}</small>`
     : "";
@@ -2537,12 +2677,12 @@ function showAdminStopWorkAlert(event) {
       <p>${escapeHtml(reason)}</p>
     </div>
     <div class="admin-stop-work-alert-actions">
-      ${event.metadata?.clipUrl ? `<button type="button" data-stop-work-video>전후 영상</button>` : ""}
+      ${(event.metadata?.beforeClipUrl || event.metadata?.afterClipUrl || event.metadata?.clipUrl) ? `<button type="button" data-stop-work-video>전후 영상</button>` : ""}
       <button type="button" data-stop-work-call>현장 무전</button>
       <button type="button" data-stop-work-open>이벤트 확인</button>
     </div>`;
   document.body.append(card);
-  $("[data-stop-work-video]", card)?.addEventListener("click", () => { card.remove(); openStopWorkVideo(event.metadata?.clipUrl); });
+  $("[data-stop-work-video]", card)?.addEventListener("click", () => { card.remove(); openStopWorkVideo(event.metadata?.beforeClipUrl, event.metadata?.afterClipUrl, event.metadata?.clipUrl); });
   $("[data-stop-work-open]", card)?.addEventListener("click", () => {
     card.remove();
     goToPage("events");
@@ -2870,21 +3010,31 @@ async function saveGuardZoneFromUser() {
   }
 }
 
-function openStopWorkVideo(url) {
-  if (!url) return toast("저장된 전후 영상이 없습니다.");
+function openStopWorkVideo(beforeUrl, afterUrl, legacyUrl = null) {
+  if (!beforeUrl && !afterUrl && !legacyUrl) return toast("저장된 전후 영상이 없습니다.");
   const modal = $("#stopWorkVideoModal");
-  const player = $("#stopWorkVideoPlayer");
-  player.src = url;
+  const beforePlayer = $("#stopWorkBeforePlayer");
+  const afterPlayer = $("#stopWorkAfterPlayer");
+  const beforePane = $("#stopWorkBeforePane");
+  const afterPane = $("#stopWorkAfterPane");
+  const safeBefore = beforeUrl || null;
+  const safeAfter = afterUrl || legacyUrl || null;
+  beforePane.hidden = !safeBefore;
+  afterPane.hidden = !safeAfter;
+  if (safeBefore) beforePlayer.src = safeBefore;
+  if (safeAfter) afterPlayer.src = safeAfter;
   modal.hidden = false;
-  player.play().catch(() => {});
+  (safeBefore ? beforePlayer : afterPlayer)?.play().catch(() => {});
 }
 
 function closeStopWorkVideo() {
   const modal = $("#stopWorkVideoModal");
-  const player = $("#stopWorkVideoPlayer");
-  try { player.pause(); } catch { /* noop */ }
-  player.removeAttribute("src");
-  player.load();
+  [$("#stopWorkBeforePlayer"), $("#stopWorkAfterPlayer")].forEach((player) => {
+    if (!player) return;
+    try { player.pause(); } catch { /* noop */ }
+    player.removeAttribute("src");
+    player.load();
+  });
   modal.hidden = true;
 }
 

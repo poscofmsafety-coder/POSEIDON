@@ -1,6 +1,6 @@
 {
   "project": "POSEIDON",
-  "version": "6.3.0",
+  "version": "6.4.0",
   "theme": "mythology-command",
   "cloudflare": "workers+d1+durable-objects",
   "durableObjects": "exports-sqlite",
@@ -21,5 +21,7 @@
   "stopWorkNotify": "dashboard+optional-email+sms+webhook",
   "responsiveUi": "phone+tablet+desktop+safe-area",
   "stopWorkViewer": "centered-modal",
-  "fieldZoneEditor": "polygon-touch+draggable-resizable-rectangle"
+  "fieldZoneEditor": "polygon-touch+draggable-resizable-rectangle",
+  "stopWorkVideo": "split-valid-before-after+range-playback",
+  "dashboardKpi": "click-through+stop-work-card+remove-total-24h-card"
 }

@@ -393,17 +393,22 @@ async function getEvents(env, url) {
 
 async function getSummary(env) {
   const devices = await getDevices(env);
-  const eventsResult = await env.DB.prepare("SELECT * FROM events WHERE occurred_at >= ? ORDER BY occurred_at DESC").bind(new Date(Date.now() - 86400000).toISOString()).all();
-  const events = eventsResult.results || [];
+  const recentResult = await env.DB.prepare("SELECT category FROM events WHERE occurred_at >= ? ORDER BY occurred_at DESC").bind(new Date(Date.now() - 86400000).toISOString()).all();
+  const recentEvents = recentResult.results || [];
+  const actionRow = await env.DB.prepare(`SELECT
+    COALESCE(SUM(CASE WHEN acknowledged=0 AND severity IN ('high','critical') THEN 1 ELSE 0 END),0) AS high_risk,
+    COALESCE(SUM(CASE WHEN acknowledged=0 AND type='STOP_WORK_REQUEST' THEN 1 ELSE 0 END),0) AS stop_work,
+    COALESCE(SUM(CASE WHEN acknowledged=0 THEN 1 ELSE 0 END),0) AS unacknowledged
+    FROM events`).first();
   const categoryCounts = {};
-  for (const event of events) categoryCounts[event.category] = (categoryCounts[event.category] || 0) + 1;
+  for (const event of recentEvents) categoryCounts[event.category] = (categoryCounts[event.category] || 0) + 1;
   return {
     online: devices.filter((device) => device.status === "online").length,
     totalDevices: devices.length,
     people: devices.reduce((sum, device) => sum + device.peopleCount, 0),
-    todayEvents: events.length,
-    highRisk: events.filter((event) => ["high", "critical"].includes(event.severity)).length,
-    unacknowledged: events.filter((event) => !event.acknowledged).length,
+    highRisk: Number(actionRow?.high_risk || 0),
+    stopWork: Number(actionRow?.stop_work || 0),
+    unacknowledged: Number(actionRow?.unacknowledged || 0),
     categoryCounts,
     generatedAt: nowIso(),
   };
@@ -442,6 +447,7 @@ async function cleanupEventsOlderThan(env, days) {
   await env.DB.batch([
     env.DB.prepare("DELETE FROM media WHERE key IN (SELECT snapshot_key FROM events WHERE occurred_at < ? AND snapshot_key IS NOT NULL)").bind(cutoff),
     env.DB.prepare("DELETE FROM media WHERE key IN (SELECT clip_key FROM stop_work_requests WHERE occurred_at < ? AND clip_key IS NOT NULL)").bind(cutoff),
+    env.DB.prepare("DELETE FROM media WHERE key LIKE 'stop-work/%' AND updated_at < ?").bind(cutoff),
     env.DB.prepare("DELETE FROM stop_work_requests WHERE occurred_at < ?").bind(cutoff),
     env.DB.prepare("DELETE FROM events WHERE occurred_at < ?").bind(cutoff),
   ]);
@@ -649,8 +655,6 @@ async function handleApi(request, env, ctx) {
     const requestId = randomId("stop");
     const eventId = randomId("evt");
     let snapshotKey = null;
-    let clipKey = null;
-    let clipContentType = "";
 
     const snapshotBase64 = String(form.get("snapshotBase64") || "");
     if (snapshotBase64) {
@@ -658,15 +662,39 @@ async function handleApi(request, env, ctx) {
       if (bytes.byteLength <= 1_200_000) snapshotKey = await putImage(env, `events/${deviceId}/${eventId}.jpg`, bytes, "image/jpeg");
     }
 
-    const clip = form.get("clip");
-    if (clip && typeof clip.arrayBuffer === "function" && Number(clip.size || 0) > 0) {
-      if (Number(clip.size || 0) > 1_400_000) return error("작업중지 전후 영상은 1.4MB 이하여야 합니다.", 413);
-      clipContentType = String(clip.type || "video/webm");
-      const ext = clipContentType.includes("mp4") ? "mp4" : "webm";
-      clipKey = await putImage(env, `stop-work/${deviceId}/${requestId}.${ext}`, new Uint8Array(await clip.arrayBuffer()), clipContentType);
+    async function storeStopClip(fieldName, phase) {
+      const clip = form.get(fieldName);
+      if (!clip || typeof clip.arrayBuffer !== "function" || Number(clip.size || 0) <= 0) return { key: null, url: null, contentType: "" };
+      if (Number(clip.size || 0) > 1_400_000) throw new Error(`${phase} 영상은 1.4MB 이하여야 합니다.`);
+      const contentType = String(clip.type || "video/webm");
+      const ext = contentType.includes("mp4") ? "mp4" : "webm";
+      const key = await putImage(env, `stop-work/${deviceId}/${requestId}-${phase}.${ext}`, new Uint8Array(await clip.arrayBuffer()), contentType);
+      return { key, url: key ? `/media/${encodeURIComponent(key)}` : null, contentType };
     }
 
-    const clipUrl = clipKey ? `/media/${encodeURIComponent(clipKey)}` : null;
+    let beforeMedia = { key: null, url: null, contentType: "" };
+    let afterMedia = { key: null, url: null, contentType: "" };
+    try {
+      beforeMedia = await storeStopClip("beforeClip", "before");
+      afterMedia = await storeStopClip("afterClip", "after");
+      // V6.3 이하 클라이언트 호환
+      if (!beforeMedia.key && !afterMedia.key) {
+        const legacy = form.get("clip");
+        if (legacy && typeof legacy.arrayBuffer === "function" && Number(legacy.size || 0) > 0) {
+          if (Number(legacy.size || 0) > 1_400_000) return error("작업중지 전후 영상은 1.4MB 이하여야 합니다.", 413);
+          const contentType = String(legacy.type || "video/webm");
+          const ext = contentType.includes("mp4") ? "mp4" : "webm";
+          const key = await putImage(env, `stop-work/${deviceId}/${requestId}-legacy.${ext}`, new Uint8Array(await legacy.arrayBuffer()), contentType);
+          afterMedia = { key, url: key ? `/media/${encodeURIComponent(key)}` : null, contentType };
+        }
+      }
+    } catch (clipError) {
+      return error(clipError.message || "작업중지 영상을 저장하지 못했습니다.", 413);
+    }
+
+    const clipKey = afterMedia.key || beforeMedia.key || null;
+    const clipContentType = afterMedia.contentType || beforeMedia.contentType || "";
+    const clipUrl = afterMedia.url || beforeMedia.url || null;
     const metadata = {
       stopWork: true,
       stopWorkId: requestId,
@@ -675,6 +703,10 @@ async function handleApi(request, env, ctx) {
       reason,
       clipUrl,
       clipKey,
+      beforeClipUrl: beforeMedia.url,
+      beforeClipKey: beforeMedia.key,
+      afterClipUrl: afterMedia.url,
+      afterClipKey: afterMedia.key,
       beforeSeconds: 10,
       afterSeconds: 10,
     };
@@ -870,7 +902,7 @@ async function handleApi(request, env, ctx) {
     const metadata = safeJsonParse(row.metadata_json, {});
     const statements = [env.DB.prepare("DELETE FROM events WHERE id=?").bind(eventId)];
     if (row.snapshot_key) statements.unshift(env.DB.prepare("DELETE FROM media WHERE key=?").bind(row.snapshot_key));
-    if (metadata.clipKey) statements.unshift(env.DB.prepare("DELETE FROM media WHERE key=?").bind(String(metadata.clipKey)));
+    for (const mediaKey of [metadata.clipKey, metadata.beforeClipKey, metadata.afterClipKey].filter(Boolean)) statements.unshift(env.DB.prepare("DELETE FROM media WHERE key=?").bind(String(mediaKey)));
     if (metadata.stopWorkId) statements.push(env.DB.prepare("DELETE FROM stop_work_requests WHERE id=?").bind(String(metadata.stopWorkId)));
     await env.DB.batch(statements);
     return json({ ok: true });
@@ -1011,9 +1043,23 @@ async function handleMedia(request, env) {
   const key = decodeURIComponent(url.pathname.replace(/^\/media\//, ""));
   if (!key) return error("미디어 키가 없습니다.", 404);
   const row = await env.DB.prepare("SELECT content_type,bytes,byte_length,updated_at FROM media WHERE key=?").bind(key).first();
-  if (!row) return error("이미지를 찾을 수 없습니다.", 404);
+  if (!row) return error("미디어를 찾을 수 없습니다.", 404);
   const body = new Uint8Array(row.bytes || []);
-  return new Response(body, { headers: { "content-type": row.content_type || "image/jpeg", "content-length": String(row.byte_length || body.byteLength), "cache-control": "no-store", "x-media-storage": "d1" } });
+  const total = body.byteLength;
+  const contentType = row.content_type || "application/octet-stream";
+  const commonHeaders = { "content-type": contentType, "cache-control": "no-store", "x-media-storage": "d1", "accept-ranges": "bytes" };
+  const range = request.headers.get("range");
+  if (range && /^bytes=\d*-\d*$/.test(range)) {
+    const [rawStart, rawEnd] = range.replace("bytes=", "").split("-");
+    const start = rawStart ? Math.max(0, Number(rawStart)) : 0;
+    const end = rawEnd ? Math.min(total - 1, Number(rawEnd)) : total - 1;
+    if (!Number.isFinite(start) || !Number.isFinite(end) || start > end || start >= total) {
+      return new Response(null, { status: 416, headers: { ...commonHeaders, "content-range": `bytes */${total}` } });
+    }
+    const slice = body.slice(start, end + 1);
+    return new Response(slice, { status: 206, headers: { ...commonHeaders, "content-length": String(slice.byteLength), "content-range": `bytes ${start}-${end}/${total}` } });
+  }
+  return new Response(body, { headers: { ...commonHeaders, "content-length": String(total) } });
 }
 
 async function proxyModel(request, ctx, modelUrl, cachePath, filename, errorMessage) {
@@ -1021,7 +1067,7 @@ async function proxyModel(request, ctx, modelUrl, cachePath, filename, errorMess
   const cacheKey = new Request(new URL(cachePath, request.url), { method: "GET" });
   const cached = await cache.match(cacheKey);
   if (cached) return cached;
-  const upstream = await fetch(modelUrl, { redirect: "follow", headers: { "user-agent": "POSEIDON-AI-Safety/6.3" } });
+  const upstream = await fetch(modelUrl, { redirect: "follow", headers: { "user-agent": "POSEIDON-AI-Safety/6.4" } });
   if (!upstream.ok) return error(errorMessage, 502, `upstream ${upstream.status}`);
   const headers = new Headers(upstream.headers);
   headers.set("content-type", "application/octet-stream");
