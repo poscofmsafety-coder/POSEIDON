@@ -1,6 +1,6 @@
 {
   "project": "POSEIDON",
-  "version": "6.9.0",
+  "version": "6.10.0",
   "theme": "mythology-command",
   "cloudflare": "workers+d1+durable-objects",
   "durableObjects": "exports-sqlite",
@@ -26,5 +26,5 @@
   "dashboardKpi": "click-through+stop-work-card+remove-total-24h-card",
   "adminZoneEditor": "ppt-style-polygon+rectangle+drag+8handles+x-delete+keyboard-delete",
   "safetyLawSearch": "KOSHA-smart-search+literal-match-ranking+scroll-full-content+new-field-quick-queries+law.go.kr",
-  "smartMsds": "admin-pdf-upload+chunked-d1+search+in-app-viewer+user-readonly"
+  "smartMsds": "admin-pdf-upload+chunked-d1+search+in-app-viewer+user-readonly+tolerant-pdf-header-validation"
 }

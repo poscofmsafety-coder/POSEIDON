@@ -3535,6 +3535,33 @@ function setMsdsSelectedFile(file) {
   if (titleInput && !titleInput.value.trim()) titleInput.value = file.name.replace(/\.pdf$/i, "");
 }
 
+async function validateMsdsPdfFile(file) {
+  if (!file) return { ok: false, message: "등록할 MSDS PDF를 선택해주세요." };
+  const nameLooksPdf = /\.pdf$/i.test(file.name || "");
+  const mimeLooksPdf = !file.type || file.type === "application/pdf" || file.type === "application/octet-stream";
+  if (!nameLooksPdf && !mimeLooksPdf) return { ok: false, message: "PDF 파일만 등록할 수 있습니다." };
+  if (file.size > 12 * 1024 * 1024) return { ok: false, message: "MSDS PDF는 파일 1개당 12MB 이하로 등록해주세요." };
+  if (!file.size) return { ok: false, message: "빈 PDF 파일은 등록할 수 없습니다." };
+  try {
+    const head = new Uint8Array(await file.slice(0, Math.min(file.size, 4096)).arrayBuffer());
+    const signature = [0x25, 0x50, 0x44, 0x46, 0x2d]; // %PDF-
+    const maxOffset = Math.max(0, head.length - signature.length);
+    let found = false;
+    outer: for (let offset = 0; offset <= maxOffset; offset += 1) {
+      for (let index = 0; index < signature.length; index += 1) {
+        if (head[offset + index] !== signature[index]) continue outer;
+      }
+      found = true;
+      break;
+    }
+    if (!found) return { ok: false, message: "선택한 파일에서 PDF 헤더를 찾지 못했습니다. PDF로 다시 저장한 뒤 시도해주세요." };
+  } catch {
+    // 일부 모바일 브라우저에서 로컬 파일 앞부분 읽기가 제한되더라도
+    // 서버에서 다시 검증하므로 업로드 자체는 막지 않습니다.
+  }
+  return { ok: true };
+}
+
 function renderMsdsStorage(stats = state.msds.stats) {
   state.msds.stats = stats || state.msds.stats;
   const storage = $("#msdsStorageText");
@@ -3626,8 +3653,8 @@ async function uploadMsdsDocument(event) {
   const title = $("#msdsTitleInput")?.value?.trim() || "";
   if (!file) { toast("등록할 MSDS PDF를 선택해주세요."); return; }
   if (!title) { toast("물질명 또는 제품명을 입력해주세요."); return; }
-  if (!/\.pdf$/i.test(file.name) && file.type !== "application/pdf") { toast("PDF 파일만 등록할 수 있습니다."); return; }
-  if (file.size > 12 * 1024 * 1024) { toast("MSDS PDF는 파일 1개당 12MB 이하로 등록해주세요.", 5000); return; }
+  const validation = await validateMsdsPdfFile(file);
+  if (!validation.ok) { toast(validation.message, 5000); return; }
   const button = $("#msdsUploadButton");
   if (button) { button.disabled = true; button.textContent = "업로드 중..."; }
   try {
@@ -3664,9 +3691,10 @@ async function deleteSelectedMsds() {
   } catch (error) { toast(error.message, 5000); }
 }
 
-function handleMsdsFileSelection(file) {
+async function handleMsdsFileSelection(file) {
   if (!file) { setMsdsSelectedFile(null); return; }
-  if (!/\.pdf$/i.test(file.name) && file.type !== "application/pdf") { toast("PDF 파일만 등록할 수 있습니다."); return; }
+  const validation = await validateMsdsPdfFile(file);
+  if (!validation.ok) { toast(validation.message, 5000); setMsdsSelectedFile(null); return; }
   setMsdsSelectedFile(file);
 }
 

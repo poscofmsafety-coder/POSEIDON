@@ -822,14 +822,32 @@ async function listMsdsDocuments(env, query = "") {
   return { items: (rows.results || []).map(mapMsdsDocument), stats: await getMsdsStats(env) };
 }
 
+function findPdfHeaderOffset(bytes, maxScanBytes = 4096) {
+  // PDF 헤더는 일반적으로 파일 첫 바이트에서 시작하지만,
+  // 일부 정상 PDF는 BOM/개행/래퍼 바이트 때문에 앞에 몇 바이트가 붙을 수 있습니다.
+  // PDF 규격/실사용 파일 호환성을 위해 앞부분에서 %PDF- 시그니처를 탐색합니다.
+  if (!(bytes instanceof Uint8Array) || bytes.byteLength < 5) return -1;
+  const signature = [0x25, 0x50, 0x44, 0x46, 0x2d]; // %PDF-
+  const scanLimit = Math.min(bytes.byteLength - signature.length, Math.max(0, maxScanBytes));
+  outer: for (let offset = 0; offset <= scanLimit; offset += 1) {
+    for (let index = 0; index < signature.length; index += 1) {
+      if (bytes[offset + index] !== signature[index]) continue outer;
+    }
+    return offset;
+  }
+  return -1;
+}
+
 async function storeMsdsPdf(env, file, meta) {
   const byteLength = Number(file?.size || 0);
   if (!byteLength) throw new Error("빈 PDF 파일은 등록할 수 없습니다.");
   if (byteLength > MSDS_MAX_FILE_BYTES) throw new Error("MSDS PDF는 파일 1개당 12MB 이하로 등록해주세요.");
   const buffer = await file.arrayBuffer();
   const bytes = new Uint8Array(buffer);
-  const signature = new TextDecoder().decode(bytes.slice(0, 5));
-  if (signature !== "%PDF-") throw new Error("올바른 PDF 파일인지 확인해주세요.");
+  const headerOffset = findPdfHeaderOffset(bytes);
+  if (headerOffset < 0) {
+    throw new Error("PDF 확장자는 확인됐지만 PDF 본문 헤더를 읽지 못했습니다. 암호화/보안문서이거나 다른 형식일 수 있습니다. PDF로 다시 저장한 뒤 시도해주세요.");
+  }
   const stats = await getMsdsStats(env);
   if (stats.totalBytes + byteLength > MSDS_SOFT_STORAGE_BYTES) throw new Error("MSDS 권장 저장용량 150MB에 도달했습니다. 오래된 자료를 삭제하거나 R2 저장소 확장을 권장합니다.");
 
