@@ -1035,3 +1035,107 @@ button, .top-action, .icon-button, .table-action { min-height: 42px; }
 }
 .guard-zone-editor-actions #guardZoneDelete { grid-column: 1 / -1; }
 @media (max-width: 640px) { .guard-zone-editor-actions #guardZoneDelete { grid-column: auto; } }
+
+
+/* V6.6 Smart Safety Law Search */
+.law-quick-card {
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(145deg, rgba(5,31,48,.96), rgba(4,19,31,.98));
+}
+.law-quick-card::after {
+  content: "§";
+  position: absolute;
+  right: -12px;
+  bottom: -42px;
+  font: 800 150px/1 Georgia, serif;
+  color: rgba(67,223,241,.055);
+  pointer-events: none;
+}
+.law-quick-card > * { position: relative; z-index: 1; }
+.law-quick-card > p { color: var(--muted); line-height: 1.65; margin: 0 0 14px; word-break: keep-all; }
+.law-live-badge, .law-source-chip {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-height: 30px; padding: 0 11px; border: 1px solid rgba(64,225,239,.30); border-radius: 999px;
+  color: #74edf4; background: rgba(23,171,190,.10); font-size: 11px; font-weight: 900; letter-spacing: .05em;
+}
+.law-quick-form, .law-search-form { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 9px; }
+.law-quick-form input, .law-search-form input {
+  width: 100%; min-width: 0; min-height: 48px; border: 1px solid rgba(96,198,219,.28); border-radius: 12px;
+  padding: 0 14px; color: var(--text); background: rgba(2,17,28,.86); outline: none;
+}
+.law-quick-form input:focus, .law-search-form input:focus { border-color: #49deee; box-shadow: 0 0 0 3px rgba(73,222,238,.10); }
+.law-quick-form .primary-button { min-height: 48px; padding-inline: 16px; }
+.law-quick-chips, .law-suggestion-row { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 11px; }
+.law-quick-chips button, .law-suggestion-row button {
+  min-height: 34px; border: 1px solid rgba(118,190,210,.22); border-radius: 999px; padding: 0 11px;
+  color: #b9d7e1; background: rgba(255,255,255,.025); font-size: 11px; font-weight: 800;
+}
+.law-quick-chips button:hover, .law-suggestion-row button:hover { border-color: rgba(72,225,239,.58); color: #fff; background: rgba(52,210,228,.08); }
+.law-more-button { margin-top: 12px; }
+.guard-law-card { border-color: rgba(62,213,230,.22); }
+
+.law-toolbar { align-items: center; }
+.law-search-hero { display: grid; grid-template-columns: 94px minmax(0,1fr); gap: 24px; align-items: center; padding: 28px; border-color: rgba(61,219,237,.25); background: radial-gradient(circle at 10% 20%, rgba(34,201,225,.10), transparent 36%), linear-gradient(145deg, #061b2a, #05131f); }
+.law-search-symbol { width: 84px; height: 84px; display: grid; place-items: center; border: 1px solid rgba(83,225,240,.32); border-radius: 24px; color: #67edf5; background: rgba(17,142,164,.10); box-shadow: inset 0 0 30px rgba(46,215,234,.06); font: 900 48px/1 Georgia, serif; }
+.law-search-main { min-width: 0; }
+.law-search-main h3 { margin: 2px 0 6px; font-size: clamp(20px,2vw,29px); }
+.law-search-main > div:first-child > p:last-child { margin: 0 0 18px; color: var(--muted); word-break: keep-all; }
+.law-search-form input { min-height: 58px; font-size: 16px; }
+.law-search-form .primary-button { min-height: 58px; min-width: 120px; }
+.law-notice { display: flex; gap: 12px; align-items: flex-start; margin: 14px 0; padding: 13px 16px; border: 1px solid rgba(224,184,83,.20); border-radius: 14px; background: rgba(113,79,7,.10); color: #d8d0ad; }
+.law-notice > span { color: #f1d36f; font-size: 20px; }
+.law-notice p { margin: 0; line-height: 1.55; font-size: 12px; word-break: keep-all; }
+.law-search-state { display: grid; grid-template-columns: 14px auto 1fr; gap: 9px; align-items: center; min-height: 52px; margin-bottom: 14px; padding: 10px 14px; border: 1px solid var(--line); border-radius: 13px; background: rgba(5,22,34,.75); }
+.law-search-state b { font-size: 13px; white-space: nowrap; }
+.law-search-state small { color: var(--muted); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.law-state-orb { width: 9px; height: 9px; border-radius: 50%; background: #8094a0; box-shadow: 0 0 0 4px rgba(128,148,160,.08); }
+.law-search-state.loading .law-state-orb { background: #42dfef; box-shadow: 0 0 0 4px rgba(66,223,239,.10), 0 0 16px rgba(66,223,239,.5); animation: pulse 1s infinite; }
+.law-state-orb.ready { background: #4ee19a; }
+.law-state-orb.error { background: #ff5f70; }
+.law-result-summary { display: flex; justify-content: space-between; gap: 16px; align-items: center; margin: 14px 0 18px; padding: 14px 16px; border: 1px solid rgba(64,217,234,.18); border-radius: 14px; background: rgba(4,26,39,.82); }
+.law-result-summary strong { color: #6beaf3; }
+.law-count-pills { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+.law-count-pills span { padding: 6px 9px; border-radius: 999px; background: rgba(255,255,255,.045); color: #a9c8d2; font-size: 11px; font-weight: 800; }
+.law-results { display: grid; gap: 22px; }
+.law-result-group { display: grid; gap: 11px; }
+.law-group-title { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding-inline: 2px; }
+.law-group-title h3 { margin: 0; font-size: 18px; }
+.law-group-title span { color: var(--muted); font-size: 12px; }
+.law-result-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 12px; }
+.law-result-card { min-width: 0; padding: 18px; border: 1px solid rgba(87,157,180,.18); border-radius: 16px; background: linear-gradient(145deg, rgba(7,29,43,.96), rgba(4,19,31,.98)); }
+.law-result-card:hover { border-color: rgba(66,218,236,.32); transform: translateY(-1px); }
+.law-result-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.law-result-head small { color: var(--muted); font-size: 10px; }
+.law-result-badge { display: inline-flex; min-height: 26px; align-items: center; padding: 0 9px; border-radius: 999px; font-size: 10px; font-weight: 900; }
+.law-result-badge.law { color: #62ecf4; background: rgba(50,206,226,.11); border: 1px solid rgba(50,206,226,.25); }
+.law-result-badge.guide { color: #f0d16a; background: rgba(218,173,43,.10); border: 1px solid rgba(218,173,43,.24); }
+.law-result-badge.media { color: #a9b9ff; background: rgba(113,127,255,.10); border: 1px solid rgba(113,127,255,.23); }
+.law-result-card h3 { margin: 12px 0 7px; font-size: 16px; line-height: 1.45; word-break: keep-all; }
+.law-result-category { margin: 0 0 9px; color: #7cc4d6; font-size: 11px; font-weight: 800; }
+.law-result-content { margin: 0; color: #b3c4cb; font-size: 12px; line-height: 1.7; white-space: pre-line; word-break: keep-all; display: -webkit-box; -webkit-line-clamp: 6; -webkit-box-orient: vertical; overflow: hidden; }
+.law-result-actions { margin-top: 14px; }
+.law-result-actions .secondary-button { display: inline-flex; min-height: 38px; align-items: center; text-decoration: none; font-size: 11px; }
+.law-empty-state { min-height: 260px; display: grid; place-items: center; align-content: center; text-align: center; gap: 8px; padding: 30px; border: 1px dashed rgba(102,180,202,.23); border-radius: 18px; color: var(--muted); background: rgba(5,23,35,.45); }
+.law-empty-state > span { color: #53ddea; font-size: 34px; }
+.law-empty-state h3 { margin: 0; color: var(--text); }
+.law-empty-state p { margin: 0; }
+.law-error-state > span { color: #ff6879; }
+.law-error-state small { color: #d5a6ad; }
+
+@media (max-width: 900px) {
+  .law-search-hero { grid-template-columns: 70px minmax(0,1fr); padding: 20px; gap: 16px; }
+  .law-search-symbol { width: 64px; height: 64px; border-radius: 18px; font-size: 38px; }
+  .law-result-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 620px) {
+  .law-search-hero { grid-template-columns: 1fr; padding: 16px; }
+  .law-search-symbol { width: 52px; height: 52px; border-radius: 15px; font-size: 30px; }
+  .law-search-form, .law-quick-form { grid-template-columns: 1fr; }
+  .law-search-form .primary-button, .law-quick-form .primary-button { width: 100%; }
+  .law-result-summary { align-items: flex-start; flex-direction: column; }
+  .law-count-pills { justify-content: flex-start; }
+  .law-search-state { grid-template-columns: 12px 1fr; }
+  .law-search-state small { grid-column: 2; white-space: normal; }
+  .law-result-card { padding: 15px; }
+}

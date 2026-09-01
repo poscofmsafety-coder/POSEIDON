@@ -1,6 +1,6 @@
 {
   "project": "POSEIDON",
-  "version": "6.5.0",
+  "version": "6.6.0",
   "theme": "mythology-command",
   "cloudflare": "workers+d1+durable-objects",
   "durableObjects": "exports-sqlite",
@@ -24,5 +24,6 @@
   "fieldZoneEditor": "ppt-style-polygon+rectangle+drag+8handles+x-delete+keyboard-delete",
   "stopWorkVideo": "split-valid-before-after+range-playback",
   "dashboardKpi": "click-through+stop-work-card+remove-total-24h-card",
-  "adminZoneEditor": "ppt-style-polygon+rectangle+drag+8handles+x-delete+keyboard-delete"
+  "adminZoneEditor": "ppt-style-polygon+rectangle+drag+8handles+x-delete+keyboard-delete",
+  "safetyLawSearch": "KOSHA-smart-search+law.go.kr+admin-user-ui"
 }

@@ -572,6 +572,116 @@ async function sendStopWorkNotifications(env, detail) {
   return results;
 }
 
+/* ---------- Smart safety law search ---------- */
+
+function stripHtml(value) {
+  return String(value || "")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function safetyLawCategoryInfo(category) {
+  const map = {
+    "8": { name: "중대재해 처벌법", searchName: "중대재해 처벌 등에 관한 법률", priority: 1 },
+    "9": { name: "중대재해 처벌법 시행령", searchName: "중대재해 처벌 등에 관한 법률 시행령", priority: 2 },
+    "1": { name: "산업안전보건법", searchName: "산업안전보건법", priority: 3 },
+    "2": { name: "산업안전보건법 시행령", searchName: "산업안전보건법 시행령", priority: 4 },
+    "3": { name: "산업안전보건법 시행규칙", searchName: "산업안전보건법 시행규칙", priority: 5 },
+    "4": { name: "산업안전보건기준에 관한 규칙", searchName: "산업안전보건기준에 관한 규칙", priority: 6 },
+    "11": { name: "유해·위험작업 취업제한 규칙", searchName: "유해ㆍ위험작업의 취업 제한에 관한 규칙", priority: 7 },
+    "5": { name: "고시·훈령·예규", searchName: "", priority: 8 },
+  };
+  return map[String(category || "")] || null;
+}
+
+function officialLawLink(categoryInfo, title) {
+  if (!categoryInfo) return "";
+  if (!categoryInfo.searchName) {
+    const clean = stripHtml(title).split(/[\[(]|\s+-\s+/)[0].trim();
+    return `https://www.law.go.kr/admRulSc.do?menuId=5&subMenuId=41&query=${encodeURIComponent(clean || stripHtml(title))}`;
+  }
+  const match = stripHtml(title).match(/제\s*(\d+)\s*조(?:의\s*(\d+))?/);
+  let raw = `https://www.law.go.kr/법령/${categoryInfo.searchName}`;
+  if (match) raw += match[2] ? `/제${match[1]}조의${match[2]}` : `/제${match[1]}조`;
+  return encodeURI(raw);
+}
+
+async function fetchKoshaSafetySearch(env, keyword) {
+  const apiKey = String(env.KOSHA_API_KEY || "").trim();
+  if (!apiKey) throw new Error("KOSHA_API_KEY가 설정되지 않았습니다.");
+  const endpoint = new URL("https://apis.data.go.kr/B552468/srch/smartSearch");
+  endpoint.searchParams.set("serviceKey", apiKey);
+  endpoint.searchParams.set("pageNo", "1");
+  endpoint.searchParams.set("numOfRows", "60");
+  endpoint.searchParams.set("searchValue", keyword);
+  endpoint.searchParams.set("category", "0");
+  endpoint.searchParams.set("dataType", "JSON");
+
+  const response = await fetch(endpoint.toString(), {
+    headers: { "accept": "application/json", "user-agent": "POSEIDON-Safety-Law/6.6" },
+    signal: AbortSignal.timeout(15000),
+  });
+  const raw = await response.text();
+  if (!response.ok) throw new Error(`안전보건공단 API 응답 오류 (${response.status})`);
+  if (raw.trim().startsWith("<")) {
+    const auth = raw.match(/<returnAuthMsg>(.*?)<\/returnAuthMsg>/i)?.[1];
+    throw new Error(auth ? `공공데이터 인증 오류: ${stripHtml(auth)}` : "공공데이터 API가 XML 오류를 반환했습니다.");
+  }
+  let payload;
+  try { payload = JSON.parse(raw); } catch { throw new Error("안전보건공단 검색 응답을 해석하지 못했습니다."); }
+  const body = payload?.response?.body || {};
+  const sourceItems = body?.items;
+  let items = Array.isArray(sourceItems) ? sourceItems : (sourceItems?.item || []);
+  if (!Array.isArray(items)) items = items ? [items] : [];
+
+  const result = { law: [], guide: [], media: [] };
+  for (const item of items) {
+    const category = String(item?.category || "");
+    const title = stripHtml(item?.title || "제목 없음");
+    const content = stripHtml(item?.highlight_content || item?.content || "").slice(0, 850);
+    const info = safetyLawCategoryInfo(category);
+    if (info) {
+      result.law.push({
+        categoryName: info.name,
+        title,
+        content,
+        priority: info.priority,
+        link: officialLawLink(info, title),
+        source: "국가법령정보센터",
+      });
+    } else if (category === "7") {
+      result.guide.push({
+        categoryName: "KOSHA GUIDE",
+        title,
+        content,
+        link: "https://portal.kosha.or.kr/archive/resources/tech-support/search/all?page=1&rowsPerPage=10",
+        source: "한국산업안전보건공단",
+      });
+    } else if (category === "6") {
+      const link = Array.isArray(item?.filepath) ? item.filepath[0] : String(item?.filepath || "");
+      result.media.push({ categoryName: item?.media_style || "안전보건 자료", title, content, link, source: "한국산업안전보건공단" });
+    }
+  }
+  for (const item of Array.isArray(body?.total_media) ? body.total_media : []) {
+    const link = Array.isArray(item?.filepath) ? item.filepath[0] : String(item?.filepath || "");
+    result.media.push({ categoryName: item?.media_style || "안전보건 자료", title: stripHtml(item?.title || "제목 없음"), content: "", link, source: "한국산업안전보건공단" });
+  }
+  result.law.sort((a, b) => a.priority - b.priority);
+  result.law = result.law.slice(0, 24);
+  result.guide = result.guide.slice(0, 18);
+  result.media = result.media.slice(0, 12);
+  return result;
+}
+
 /* ---------- API ---------- */
 
 async function handleAuth(request, env) {
@@ -634,6 +744,21 @@ async function handleApi(request, env, ctx) {
     let extra = [];
     try { extra = env.TURN_ICE_SERVERS ? JSON.parse(env.TURN_ICE_SERVERS) : []; } catch { extra = []; }
     return json({ ok: true, data: { iceServers: [{ urls: ["stun:stun.cloudflare.com:3478"] }, ...(Array.isArray(extra) ? extra : [])] } });
+  }
+
+
+  if (path === "/api/safety-law/search" && method === "GET") {
+    const query = String(url.searchParams.get("q") || "").trim().slice(0, 80);
+    if (!query) return error("검색어를 입력해주세요.");
+    try {
+      const result = await fetchKoshaSafetySearch(env, query);
+      const searchedAt = nowIso();
+      const searchedAtLabel = new Intl.DateTimeFormat("ko-KR", { timeZone: "Asia/Seoul", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(searchedAt));
+      return json({ ok: true, data: { query, ...result, searchedAt, searchedAtLabel } });
+    } catch (searchError) {
+      console.warn("safety-law search failed", searchError?.message || searchError);
+      return error(searchError?.message || "안전보건법령 검색에 실패했습니다.", 502);
+    }
   }
 
   if (path === "/api/stop-work" && method === "POST") {

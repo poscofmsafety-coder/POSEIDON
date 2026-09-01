@@ -1,4 +1,4 @@
-const POSEIDON_BUILD = "6.5.0";
+const POSEIDON_BUILD = "6.6.0";
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -14,6 +14,7 @@ const pageTitles = {
   behavior: "불안전 행동",
   environment: "작업환경",
   equipment: "중장비",
+  law: "스마트 안전보건법령",
   events: "이벤트 센터",
   reports: "리포트",
   settings: "설정",
@@ -357,7 +358,7 @@ async function logout() {
 
 function goToPage(page) {
   if (!pageTitles[page]) return;
-  if (state.session?.role === "user" && !["guard", "user-help"].includes(page)) page = "guard";
+  if (state.session?.role === "user" && !["guard", "law", "user-help"].includes(page)) page = "guard";
   state.currentPage = page;
   $$(".page").forEach((section) => section.classList.toggle("active", section.id === `page-${page}`));
   $$(".nav-item").forEach((button) => button.classList.toggle("active", button.dataset.page === page));
@@ -414,6 +415,88 @@ async function loadDashboard(silent = false) {
   } finally {
     document.body.classList.remove("loading");
   }
+}
+
+const lawSearchState = {
+  lastQuery: "",
+  loading: false,
+};
+
+function lawCategoryLabel(type) {
+  if (type === "law") return "법령";
+  if (type === "guide") return "KOSHA GUIDE";
+  if (type === "media") return "안전보건 자료";
+  return "공식자료";
+}
+
+function lawResultCard(item, type) {
+  const badge = lawCategoryLabel(type);
+  const category = item.categoryName || badge;
+  const content = item.content || "검색된 공식 자료의 원문을 확인하세요.";
+  const source = item.source || (type === "law" ? "국가법령정보센터" : "한국산업안전보건공단");
+  const link = item.link || "";
+  return `<article class="law-result-card" data-law-type="${escapeHtml(type)}">
+    <div class="law-result-head"><span class="law-result-badge ${escapeHtml(type)}">${escapeHtml(badge)}</span><small>${escapeHtml(source)}</small></div>
+    <h3>${escapeHtml(item.title || "제목 없음")}</h3>
+    <p class="law-result-category">${escapeHtml(category)}</p>
+    <p class="law-result-content">${escapeHtml(content)}</p>
+    <div class="law-result-actions">${link ? `<a class="secondary-button" href="${escapeHtml(link)}" target="_blank" rel="noopener noreferrer">공식 원문 열기 ↗</a>` : ""}</div>
+  </article>`;
+}
+
+function renderLawResults(data, query) {
+  const law = Array.isArray(data?.law) ? data.law : [];
+  const guide = Array.isArray(data?.guide) ? data.guide : [];
+  const media = Array.isArray(data?.media) ? data.media : [];
+  const total = law.length + guide.length + media.length;
+  const summary = $("#lawResultSummary");
+  summary.hidden = false;
+  summary.innerHTML = `<div><b>“${escapeHtml(query)}”</b> 검색 결과 <strong>${total}건</strong></div><div class="law-count-pills"><span>법령 ${law.length}</span><span>KOSHA GUIDE ${guide.length}</span><span>자료 ${media.length}</span></div>`;
+
+  const groups = [
+    ["law", "관련 법령", law],
+    ["guide", "KOSHA GUIDE", guide],
+    ["media", "안전보건 자료", media],
+  ].filter(([, , items]) => items.length);
+  if (!groups.length) {
+    $("#lawResults").innerHTML = `<div class="law-empty-state"><span>⌕</span><h3>검색 결과가 없습니다</h3><p>검색어를 짧게 바꿔보세요. 예: “지게차 충돌” → “지게차”</p></div>`;
+    return;
+  }
+  $("#lawResults").innerHTML = groups.map(([type, title, items]) => `<section class="law-result-group"><div class="law-group-title"><h3>${escapeHtml(title)}</h3><span>${items.length}건</span></div><div class="law-result-grid">${items.map((item) => lawResultCard(item, type)).join("")}</div></section>`).join("");
+}
+
+async function searchSafetyLaw(query, { navigate = true } = {}) {
+  const q = String(query || "").trim();
+  if (!q) { toast("검색어를 입력해주세요."); return; }
+  if (navigate) goToPage("law");
+  const input = $("#lawSearchInput");
+  if (input) input.value = q;
+  lawSearchState.lastQuery = q;
+  lawSearchState.loading = true;
+  const stateBox = $("#lawSearchState");
+  stateBox?.classList.add("loading");
+  if (stateBox) stateBox.innerHTML = `<span class="law-state-orb"></span><b>공식자료 검색 중</b><small>${escapeHtml(q)} 관련 법령과 안전보건 자료를 확인하고 있습니다.</small>`;
+  if ($("#lawSearchButton")) $("#lawSearchButton").disabled = true;
+  try {
+    const data = await api(`/api/safety-law/search?q=${encodeURIComponent(q)}`);
+    renderLawResults(data, q);
+    if (stateBox) stateBox.innerHTML = `<span class="law-state-orb ready"></span><b>검색 완료</b><small>공식 데이터 검색 결과 · ${escapeHtml(data.searchedAtLabel || "방금")}</small>`;
+  } catch (error) {
+    if ($("#lawResultSummary")) $("#lawResultSummary").hidden = true;
+    if ($("#lawResults")) $("#lawResults").innerHTML = `<div class="law-empty-state law-error-state"><span>!</span><h3>법령 검색을 연결하지 못했습니다</h3><p>${escapeHtml(error.message)}</p><small>관리자는 Cloudflare Secret의 KOSHA_API_KEY 설정을 확인해주세요.</small></div>`;
+    if (stateBox) stateBox.innerHTML = `<span class="law-state-orb error"></span><b>검색 연결 확인 필요</b><small>공식 API 연결 상태를 확인해주세요.</small>`;
+  } finally {
+    lawSearchState.loading = false;
+    stateBox?.classList.remove("loading");
+    if ($("#lawSearchButton")) $("#lawSearchButton").disabled = false;
+  }
+}
+
+function submitQuickLawSearch(inputId) {
+  const input = $(inputId);
+  const q = input?.value?.trim();
+  if (!q) { toast("검색어를 입력해주세요."); input?.focus(); return; }
+  searchSafetyLaw(q);
 }
 
 function renderKpis() {
@@ -3461,6 +3544,11 @@ function bindEvents() {
   $$('[data-login-role]').forEach((button) => button.addEventListener("click", () => setLoginRole(button.dataset.loginRole)));
   $("#logoutButton").addEventListener("click", logout);
   $$(".nav-item").forEach((button) => button.addEventListener("click", () => goToPage(button.dataset.page)));
+  $("#lawSearchForm")?.addEventListener("submit", (event) => { event.preventDefault(); searchSafetyLaw($("#lawSearchInput")?.value, { navigate: false }); });
+  $("#adminLawQuickForm")?.addEventListener("submit", (event) => { event.preventDefault(); submitQuickLawSearch("#adminLawQuickInput"); });
+  $("#guardLawQuickForm")?.addEventListener("submit", (event) => { event.preventDefault(); submitQuickLawSearch("#guardLawQuickInput"); });
+  $$('[data-law-query]').forEach((button) => button.addEventListener("click", () => searchSafetyLaw(button.dataset.lawQuery)));
+
   $$('[data-goto]').forEach((button) => button.addEventListener("click", () => goToPage(button.dataset.goto)));
   $("#mobileMenu").addEventListener("click", () => document.body.classList.toggle("sidebar-open"));
   $("#sidebarScrim").addEventListener("click", () => document.body.classList.remove("sidebar-open"));
