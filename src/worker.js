@@ -603,6 +603,71 @@ function safetyLawCategoryInfo(category) {
   return map[String(category || "")] || null;
 }
 
+function normalizeLawSearchText(value) {
+  return stripHtml(value)
+    .normalize("NFKC")
+    .toLocaleLowerCase("ko-KR")
+    .replace(/[^\p{L}\p{N}]+/gu, "");
+}
+
+function lawSearchTerms(keyword) {
+  return stripHtml(keyword)
+    .normalize("NFKC")
+    .toLocaleLowerCase("ko-KR")
+    .split(/\s+/)
+    .map((term) => normalizeLawSearchText(term))
+    .filter(Boolean);
+}
+
+function safetyLawRelevance(item, keyword) {
+  const query = normalizeLawSearchText(keyword);
+  const title = normalizeLawSearchText(item?.title || "");
+  const content = normalizeLawSearchText(item?.content || "");
+  const category = normalizeLawSearchText(item?.categoryName || "");
+  const terms = lawSearchTerms(keyword);
+  let score = 0;
+  let matchType = "related";
+
+  if (query && title.includes(query)) {
+    score = title === query ? 12000 : 11000;
+    matchType = "title-phrase";
+  } else if (query && content.includes(query)) {
+    score = 9000;
+    matchType = "content-phrase";
+  } else if (terms.length && terms.every((term) => title.includes(term))) {
+    score = 7600;
+    matchType = "title-all-terms";
+  } else if (terms.length && terms.every((term) => content.includes(term))) {
+    score = 6200;
+    matchType = "content-all-terms";
+  } else {
+    const titleHits = terms.filter((term) => title.includes(term)).length;
+    const contentHits = terms.filter((term) => content.includes(term)).length;
+    const categoryHits = terms.filter((term) => category.includes(term)).length;
+    score = titleHits * 900 + contentHits * 350 + categoryHits * 120;
+  }
+
+  // 동일 점수에서는 제목이 짧고 검색어가 앞쪽에 있는 결과를 조금 더 우선합니다.
+  if (query && title.includes(query)) score += Math.max(0, 240 - title.indexOf(query) * 3 - title.length);
+  return { score, matchType };
+}
+
+function rankSafetyLawItems(items, keyword) {
+  return items
+    .map((item, index) => {
+      const relevance = safetyLawRelevance(item, keyword);
+      return { ...item, relevance: relevance.score, matchType: relevance.matchType, _sourceOrder: index };
+    })
+    .sort((a, b) => {
+      if (b.relevance !== a.relevance) return b.relevance - a.relevance;
+      const ap = Number.isFinite(Number(a.priority)) ? Number(a.priority) : 999;
+      const bp = Number.isFinite(Number(b.priority)) ? Number(b.priority) : 999;
+      if (ap !== bp) return ap - bp;
+      return a._sourceOrder - b._sourceOrder;
+    })
+    .map(({ _sourceOrder, ...item }) => item);
+}
+
 function officialLawLink(categoryInfo, title) {
   if (!categoryInfo) return "";
   if (!categoryInfo.searchName) {
@@ -621,13 +686,13 @@ async function fetchKoshaSafetySearch(env, keyword) {
   const endpoint = new URL("https://apis.data.go.kr/B552468/srch/smartSearch");
   endpoint.searchParams.set("serviceKey", apiKey);
   endpoint.searchParams.set("pageNo", "1");
-  endpoint.searchParams.set("numOfRows", "60");
+  endpoint.searchParams.set("numOfRows", "100");
   endpoint.searchParams.set("searchValue", keyword);
   endpoint.searchParams.set("category", "0");
   endpoint.searchParams.set("dataType", "JSON");
 
   const response = await fetch(endpoint.toString(), {
-    headers: { "accept": "application/json", "user-agent": "POSEIDON-Safety-Law/6.6" },
+    headers: { "accept": "application/json", "user-agent": "POSEIDON-Safety-Law/6.8" },
     signal: AbortSignal.timeout(15000),
   });
   const raw = await response.text();
@@ -647,7 +712,7 @@ async function fetchKoshaSafetySearch(env, keyword) {
   for (const item of items) {
     const category = String(item?.category || "");
     const title = stripHtml(item?.title || "제목 없음");
-    const content = stripHtml(item?.highlight_content || item?.content || "").slice(0, 850);
+    const content = stripHtml(item?.content || item?.highlight_content || "");
     const info = safetyLawCategoryInfo(category);
     if (info) {
       result.law.push({
@@ -675,10 +740,11 @@ async function fetchKoshaSafetySearch(env, keyword) {
     const link = Array.isArray(item?.filepath) ? item.filepath[0] : String(item?.filepath || "");
     result.media.push({ categoryName: item?.media_style || "안전보건 자료", title: stripHtml(item?.title || "제목 없음"), content: "", link, source: "한국산업안전보건공단" });
   }
-  result.law.sort((a, b) => a.priority - b.priority);
-  result.law = result.law.slice(0, 24);
-  result.guide = result.guide.slice(0, 18);
-  result.media = result.media.slice(0, 12);
+  // 검색어가 제목/본문에 직접 포함된 자료를 법 종류보다 먼저 보여줍니다.
+  // 예: “안전난간” 검색 시 “안전난간의 구조 및 설치요건”이 최상단으로 올라옵니다.
+  result.law = rankSafetyLawItems(result.law, keyword).slice(0, 30);
+  result.guide = rankSafetyLawItems(result.guide, keyword).slice(0, 18);
+  result.media = rankSafetyLawItems(result.media, keyword).slice(0, 12);
   return result;
 }
 

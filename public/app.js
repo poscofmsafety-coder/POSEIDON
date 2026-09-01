@@ -1,4 +1,4 @@
-const POSEIDON_BUILD = "6.6.0";
+const POSEIDON_BUILD = "6.7.0";
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -435,12 +435,21 @@ function lawResultCard(item, type) {
   const content = item.content || "검색된 공식 자료의 원문을 확인하세요.";
   const source = item.source || (type === "law" ? "국가법령정보센터" : "한국산업안전보건공단");
   const link = item.link || "";
+  const directMatch = ["title-phrase", "content-phrase", "title-all-terms", "content-all-terms"].includes(item.matchType);
   return `<article class="law-result-card" data-law-type="${escapeHtml(type)}">
-    <div class="law-result-head"><span class="law-result-badge ${escapeHtml(type)}">${escapeHtml(badge)}</span><small>${escapeHtml(source)}</small></div>
+    <div class="law-result-head">
+      <div class="law-result-badge-row"><span class="law-result-badge ${escapeHtml(type)}">${escapeHtml(badge)}</span>${directMatch ? `<span class="law-match-badge">검색어 일치</span>` : ""}</div>
+      <small>${escapeHtml(source)}</small>
+    </div>
     <h3>${escapeHtml(item.title || "제목 없음")}</h3>
     <p class="law-result-category">${escapeHtml(category)}</p>
-    <p class="law-result-content">${escapeHtml(content)}</p>
-    <div class="law-result-actions">${link ? `<a class="secondary-button" href="${escapeHtml(link)}" target="_blank" rel="noopener noreferrer">공식 원문 열기 ↗</a>` : ""}</div>
+    <div class="law-result-scroll-wrap">
+      <div class="law-result-content" data-law-content tabindex="0" role="region" aria-label="${escapeHtml(item.title || "법령")} 내용">${escapeHtml(content)}</div>
+      <span class="law-scroll-hint" aria-hidden="true">↕ 스크롤해서 전체 내용 보기</span>
+    </div>
+    <div class="law-result-actions">
+      ${link ? `<a class="secondary-button" href="${escapeHtml(link)}" target="_blank" rel="noopener noreferrer">공식 원문 열기 ↗</a>` : ""}
+    </div>
   </article>`;
 }
 
@@ -459,7 +468,7 @@ function renderLawResults(data, query) {
     ["media", "안전보건 자료", media],
   ].filter(([, , items]) => items.length);
   if (!groups.length) {
-    $("#lawResults").innerHTML = `<div class="law-empty-state"><span>⌕</span><h3>검색 결과가 없습니다</h3><p>검색어를 짧게 바꿔보세요. 예: “지게차 충돌” → “지게차”</p></div>`;
+    $("#lawResults").innerHTML = `<div class="law-empty-state"><span>⌕</span><h3>검색 결과가 없습니다</h3><p>검색어를 짧게 바꿔보세요. 예: “밀폐공간 적정공기” → “적정공기”</p></div>`;
     return;
   }
   $("#lawResults").innerHTML = groups.map(([type, title, items]) => `<section class="law-result-group"><div class="law-group-title"><h3>${escapeHtml(title)}</h3><span>${items.length}건</span></div><div class="law-result-grid">${items.map((item) => lawResultCard(item, type)).join("")}</div></section>`).join("");
@@ -3548,7 +3557,6 @@ function bindEvents() {
   $("#adminLawQuickForm")?.addEventListener("submit", (event) => { event.preventDefault(); submitQuickLawSearch("#adminLawQuickInput"); });
   $("#guardLawQuickForm")?.addEventListener("submit", (event) => { event.preventDefault(); submitQuickLawSearch("#guardLawQuickInput"); });
   $$('[data-law-query]').forEach((button) => button.addEventListener("click", () => searchSafetyLaw(button.dataset.lawQuery)));
-
   $$('[data-goto]').forEach((button) => button.addEventListener("click", () => goToPage(button.dataset.goto)));
   $("#mobileMenu").addEventListener("click", () => document.body.classList.toggle("sidebar-open"));
   $("#sidebarScrim").addEventListener("click", () => document.body.classList.remove("sidebar-open"));

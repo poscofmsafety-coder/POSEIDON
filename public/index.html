@@ -107,8 +107,8 @@
             <article class="panel law-quick-card">
               <div class="panel-header"><div><p class="eyebrow">SMART SAFETY LAW</p><h3>스마트 안전보건법령 검색</h3></div><span class="law-live-badge">OFFICIAL</span></div>
               <p>현장에서 궁금한 키워드를 입력하면 산업안전보건법령과 KOSHA GUIDE를 공식 데이터에서 바로 찾습니다.</p>
-              <form class="law-quick-form" id="adminLawQuickForm"><input id="adminLawQuickInput" autocomplete="off" maxlength="80" placeholder="예: 난간 높이, 작업중지, 안전모" /><button class="primary-button" type="submit">검색</button></form>
-              <div class="law-quick-chips"><button type="button" data-law-query="난간">난간</button><button type="button" data-law-query="작업중지">작업중지</button><button type="button" data-law-query="안전모">안전모</button><button type="button" data-law-query="밀폐공간">밀폐공간</button></div>
+              <form class="law-quick-form" id="adminLawQuickForm"><input id="adminLawQuickInput" autocomplete="off" maxlength="80" placeholder="예: 밀폐공간, 적정공기, 하역운반기계" /><button class="primary-button" type="submit">검색</button></form>
+              <div class="law-quick-chips"><button type="button" data-law-query="밀폐공간">밀폐공간</button><button type="button" data-law-query="적정공기">적정공기</button><button type="button" data-law-query="하역운반기계">하역운반기계</button><button type="button" data-law-query="접지">접지</button><button type="button" data-law-query="누전차단">누전차단</button></div>
               <button class="text-button law-more-button" data-goto="law" type="button">법령 검색 화면 열기 →</button>
             </article>
             <article class="panel panel-large">
@@ -193,7 +193,8 @@
               <section class="panel law-quick-card guard-law-card">
                 <div class="panel-header"><div><p class="eyebrow">FIELD LEGAL ASSIST</p><h3>스마트 안전보건법령</h3></div><span class="law-live-badge">현장검색</span></div>
                 <p>작업 중 궁금한 안전보건 법령과 기준을 현장에서 바로 확인합니다.</p>
-                <form class="law-quick-form" id="guardLawQuickForm"><input id="guardLawQuickInput" autocomplete="off" maxlength="80" placeholder="예: 사다리, 지게차, 보호구" /><button class="primary-button" type="submit">검색</button></form>
+                <form class="law-quick-form" id="guardLawQuickForm"><input id="guardLawQuickInput" autocomplete="off" maxlength="80" placeholder="예: 밀폐공간, 접지, 누전차단" /><button class="primary-button" type="submit">검색</button></form>
+                <div class="law-quick-chips"><button type="button" data-law-query="밀폐공간">밀폐공간</button><button type="button" data-law-query="적정공기">적정공기</button><button type="button" data-law-query="하역운반기계">하역운반기계</button><button type="button" data-law-query="접지">접지</button><button type="button" data-law-query="누전차단">누전차단</button></div>
                 <button class="text-button law-more-button" data-goto="law" type="button">상세 법령 검색 →</button>
               </section>
               <section class="panel radio-panel">
@@ -301,18 +302,18 @@
           <section class="panel law-search-hero">
             <div class="law-search-symbol" aria-hidden="true">§</div>
             <div class="law-search-main">
-              <div><p class="eyebrow">SEARCH SAFETY RULES & GUIDES</p><h3>현장 질문을 그대로 입력하세요</h3><p>예: “안전난간 높이 기준”, “근로자 작업중지권”, “지게차 작업 시 안전조치”</p></div>
+              <div><p class="eyebrow">SEARCH SAFETY RULES & GUIDES</p><h3>현장 질문을 그대로 입력하세요</h3><p>예: “밀폐공간”, “적정공기”, “하역운반기계”, “접지”, “누전차단”</p></div>
               <form class="law-search-form" id="lawSearchForm">
                 <input id="lawSearchInput" autocomplete="off" maxlength="80" placeholder="검색어를 입력하세요" aria-label="안전보건법령 검색어" />
                 <button class="primary-button" id="lawSearchButton" type="submit">법령 검색</button>
               </form>
               <div class="law-suggestion-row" aria-label="빠른 검색어">
-                <button type="button" data-law-query="난간 높이">난간 높이</button><button type="button" data-law-query="작업중지">작업중지</button><button type="button" data-law-query="안전모">안전모</button><button type="button" data-law-query="밀폐공간">밀폐공간</button><button type="button" data-law-query="지게차">지게차</button><button type="button" data-law-query="추락">추락</button><button type="button" data-law-query="화기작업">화기작업</button><button type="button" data-law-query="MSDS">MSDS</button>
+                <button type="button" data-law-query="밀폐공간">밀폐공간</button><button type="button" data-law-query="적정공기">적정공기</button><button type="button" data-law-query="하역운반기계">하역운반기계</button><button type="button" data-law-query="접지">접지</button><button type="button" data-law-query="누전차단">누전차단</button>
               </div>
             </div>
           </section>
           <div class="law-notice"><span>⚖</span><p><b>현장 참고용 검색</b> · 검색 결과는 안전조치 판단을 돕는 참고자료입니다. 법적 판단이 필요한 경우 최신 공식 원문과 사내 담당부서의 확인을 함께 권장합니다.</p></div>
-          <div class="law-search-state" id="lawSearchState"><span class="law-state-orb"></span><b>검색 대기</b><small>키워드를 입력하면 공식 안전보건 자료를 찾아드립니다.</small></div>
+          <div class="law-search-state" id="lawSearchState"><span class="law-state-orb"></span><b>검색 대기</b><small>입력한 문구가 제목·본문에 직접 포함된 공식자료를 우선해서 보여드립니다.</small></div>
           <div class="law-result-summary" id="lawResultSummary" hidden></div>
           <div class="law-results" id="lawResults">
             <div class="law-empty-state"><span>⚓</span><h3>POSEIDON 법령 검색 준비 완료</h3><p>현장에서 궁금한 작업·설비·보호구·위험요인을 검색해보세요.</p></div>
