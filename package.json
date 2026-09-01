@@ -1,0 +1,17 @@
+{
+  "name": "poseidon-smart-safety",
+  "version": "6.2.0",
+  "private": true,
+  "type": "module",
+  "description": "POSEIDON - POSCO Future M browser-based AI smart safety command platform",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "tail": "wrangler tail",
+    "check": "node --check src/worker.js && node --check public/app.js && node --check public/ppe-worker.js",
+    "dry-run": "wrangler deploy --dry-run --outdir .wrangler-dry-run"
+  },
+  "devDependencies": {
+    "wrangler": "4.127.1"
+  }
+}
