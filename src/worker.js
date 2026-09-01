@@ -718,6 +718,40 @@ async function handleApi(request, env, ctx) {
     return json({ ok: true, data: { requestId, eventId, clipUrl, notificationSummary } }, 201);
   }
 
+  if (path === "/api/guard/zone" && method === "PUT") {
+    const body = await readJson(request);
+    const deviceId = String(body.deviceId || "").trim();
+    if (!deviceId) return error("deviceId가 필요합니다.");
+    const row = await env.DB.prepare("SELECT config_json FROM devices WHERE id=?").bind(deviceId).first();
+    if (!row) return error("먼저 현장 지킴이를 시작해 장치를 등록해주세요.", 404);
+
+    const sourceZone = body.zone && typeof body.zone === "object" ? body.zone : {};
+    const enabled = body.enabled === true;
+    const rawPoints = Array.isArray(sourceZone.points) ? sourceZone.points.slice(0, 20) : [];
+    const points = rawPoints
+      .filter((point) => Array.isArray(point) && point.length >= 2 && Number.isFinite(Number(point[0])) && Number.isFinite(Number(point[1])))
+      .map(([x, y]) => [Math.max(0, Math.min(1, Number(x))), Math.max(0, Math.min(1, Number(y)))]);
+    if (enabled && points.length < 3) return error("위험구역을 사용하려면 점을 3개 이상 지정해주세요.");
+
+    const severity = ["medium", "high", "critical"].includes(String(sourceZone.severity)) ? String(sourceZone.severity) : "high";
+    const shape = sourceZone.shape === "rectangle" ? "rectangle" : "polygon";
+    const config = safeJsonParse(row.config_json, defaultConfig());
+    config.rules = { ...(config.rules || {}), dangerZone: enabled };
+    config.zones = [{
+      id: "zone-main",
+      name: String(sourceZone.name || "출입 제한 구역").trim().slice(0, 80) || "출입 제한 구역",
+      severity,
+      shape,
+      enabled,
+      points,
+    }];
+    config.updatedBy = auth.session.role === "admin" ? "admin" : "field-user";
+    config.zoneUpdatedAt = nowIso();
+    const result = await env.DB.prepare("UPDATE devices SET config_json=?,updated_at=? WHERE id=?").bind(JSON.stringify(config), nowIso(), deviceId).run();
+    if (!result.meta?.changes) return error("장치를 찾을 수 없습니다.", 404);
+    return json({ ok: true, data: { config, zone: config.zones[0] } });
+  }
+
   const adminOnly = path.startsWith("/api/dashboard/") || path === "/api/devices" || path.startsWith("/api/events") || path.startsWith("/api/reports/") || path.startsWith("/api/admin/") || path.startsWith("/api/demo/") || (path.startsWith("/api/devices/") && method !== "GET") || path.match(/^\/api\/events\/[^/]+\/ack$/);
   if (adminOnly && !isAdmin) return error("관리자 권한이 필요합니다.", 403);
 
@@ -987,7 +1021,7 @@ async function proxyModel(request, ctx, modelUrl, cachePath, filename, errorMess
   const cacheKey = new Request(new URL(cachePath, request.url), { method: "GET" });
   const cached = await cache.match(cacheKey);
   if (cached) return cached;
-  const upstream = await fetch(modelUrl, { redirect: "follow", headers: { "user-agent": "POSEIDON-AI-Safety/6.2" } });
+  const upstream = await fetch(modelUrl, { redirect: "follow", headers: { "user-agent": "POSEIDON-AI-Safety/6.3" } });
   if (!upstream.ok) return error(errorMessage, 502, `upstream ${upstream.status}`);
   const headers = new Headers(upstream.headers);
   headers.set("content-type", "application/octet-stream");

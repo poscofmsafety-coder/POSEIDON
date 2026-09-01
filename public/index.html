@@ -7,7 +7,7 @@
     <meta name="description" content="POSCO Future M 스마트 안전지킴이 - 브라우저 AI 안전 CCTV와 통합 관제" />
     <title>POSEIDON 스마트 안전지킴이 | POSCO Future M</title>
     <link rel="icon" href="/favicon.svg" />
-    <link rel="stylesheet" href="/styles.css?v=6.1.0" />
+    <link rel="stylesheet" href="/styles.css?v=6.3.0" />
   </head>
   <body>
     <div class="login-screen" id="loginScreen" hidden>
@@ -192,6 +192,35 @@
               </section>
               <section class="panel browser-notice"><b>운영 안내</b><p>영상은 WebRTC로 관리자에게 직접 전송되고, 위험 이벤트 스냅숏만 중앙 데이터베이스에 저장됩니다. AI 판정은 관리자 확인을 돕는 보조 정보입니다.</p></section>
             </aside>
+
+            <section class="panel guard-zone-editor-panel user-only" id="guardZoneEditorPanel">
+              <div class="panel-header guard-zone-editor-header">
+                <div><p class="eyebrow">FIELD DANGER ZONE EDITOR</p><h3>현장 위험구역 설정</h3><p>사용자도 현재 카메라 화면에서 직접 위험구역을 지정할 수 있습니다. 터치·마우스 모두 지원합니다.</p></div>
+                <label class="switch-row compact guard-zone-master-switch"><span><b>위험구역 사용</b><small>저장 즉시 현장 감지에 반영</small></span><input type="checkbox" id="guardZoneEditorEnabled" /></label>
+              </div>
+              <div class="guard-zone-mode-row" role="group" aria-label="위험구역 모양 선택">
+                <button class="zone-mode-button active" data-guard-zone-mode="polygon" type="button"><b>다각형</b><small>3곳 이상 터치</small></button>
+                <button class="zone-mode-button" data-guard-zone-mode="rectangle" type="button"><b>사각형 넣기</b><small>이동·크기조절</small></button>
+              </div>
+              <div class="guard-zone-editor-grid">
+                <div class="guard-zone-editor-stage" id="guardZoneEditorStage">
+                  <canvas id="guardZoneCanvas" width="1280" height="720" aria-label="현장 위험구역 편집 화면"></canvas>
+                  <div class="guard-zone-editor-hint" id="guardZoneEditorHint">다각형 모드 · 화면을 3곳 이상 터치하세요.</div>
+                </div>
+                <div class="guard-zone-editor-controls">
+                  <div class="guard-zone-form-grid">
+                    <label>구역 이름<input id="guardZoneName" maxlength="60" value="출입 제한 구역" /></label>
+                    <label>위험 등급<select id="guardZoneSeverity"><option value="medium">주의</option><option value="high" selected>위험</option><option value="critical">긴급</option></select></label>
+                  </div>
+                  <div class="guard-zone-help" id="guardZoneHelp"><b>다각형 사용법</b><span>카메라 화면을 3곳 이상 터치하면 선이 연결됩니다. 빨간 점은 다시 끌어서 위치를 조정할 수 있습니다.</span></div>
+                  <div class="guard-zone-editor-actions">
+                    <button class="secondary-button" id="guardZoneUndo" type="button">마지막 점 취소</button>
+                    <button class="secondary-button" id="guardZoneReset" type="button">구역 초기화</button>
+                    <button class="primary-button" id="guardZoneSave" type="button">위험구역 저장</button>
+                  </div>
+                </div>
+              </div>
+            </section>
           </div>
         </section>
 
@@ -286,6 +315,16 @@
           <button class="secondary-button" id="cancelStopWork" type="button">취소</button>
           <button class="danger-button stop-work-submit" id="submitStopWork" type="button" disabled>작업중지 요청 보내기</button>
         </div>
+      </section>
+    </div>
+
+    <div class="modal-backdrop media-viewer-backdrop" id="stopWorkVideoModal" hidden>
+      <section class="modal-card media-viewer-card" role="dialog" aria-modal="true" aria-labelledby="stopWorkVideoTitle">
+        <button class="modal-close" id="stopWorkVideoClose" type="button" aria-label="닫기">×</button>
+        <p class="eyebrow">STOP-WORK INCIDENT RECORD</p>
+        <h2 id="stopWorkVideoTitle">작업중지 전후 영상</h2>
+        <div class="stop-work-video-frame"><video id="stopWorkVideoPlayer" controls playsinline preload="metadata"></video></div>
+        <p class="media-viewer-note">작업중지권 발동 전 최대 10초와 발동 후 약 10초 기록입니다.</p>
       </section>
     </div>
 

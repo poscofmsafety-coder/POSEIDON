@@ -1,6 +1,6 @@
 {
   "project": "POSEIDON",
-  "version": "6.2.0",
+  "version": "6.3.0",
   "theme": "mythology-command",
   "cloudflare": "workers+d1+durable-objects",
   "durableObjects": "exports-sqlite",
@@ -18,5 +18,8 @@
   "voiceAlerts": "per-detection-item",
   "heroReadability": "no-break-poseidon-risk-phrase",
   "stopWorkAuthority": "red-fab+10s-pre+10s-post+reason+admin-alert",
-  "stopWorkNotify": "dashboard+optional-email+sms+webhook"
+  "stopWorkNotify": "dashboard+optional-email+sms+webhook",
+  "responsiveUi": "phone+tablet+desktop+safe-area",
+  "stopWorkViewer": "centered-modal",
+  "fieldZoneEditor": "polygon-touch+draggable-resizable-rectangle"
 }

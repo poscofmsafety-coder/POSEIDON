@@ -1,4 +1,4 @@
-const POSEIDON_BUILD = "6.2.0";
+const POSEIDON_BUILD = "6.3.0";
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -203,6 +203,18 @@ const stopWorkState = {
   incident: null,
   countdownTimer: null,
   maxPreMs: 10500,
+};
+
+const guardZoneEditor = {
+  mode: "polygon",
+  points: [],
+  enabled: false,
+  dirty: false,
+  drag: null,
+  pointerStart: null,
+  suppressAdd: false,
+  loopTimer: null,
+  view: { x: 0, y: 0, width: 1280, height: 720 },
 };
 
 function escapeHtml(value) {
@@ -1343,6 +1355,7 @@ async function startGuard() {
     startStopWorkRollingBuffer();
     await registerGuard();
     await fetchGuardConfig();
+    drawGuardZoneEditor();
     guard.signal = createSignal(getGuardDeviceId(), "guard", handleGuardSignalMessage);
     startGuardWorker();
     startGuardTimers();
@@ -1441,6 +1454,7 @@ async function fetchGuardConfig() {
   try {
     guard.config = await api(`/api/devices/${encodeURIComponent(getGuardDeviceId())}/config`);
     $("#guardVoiceEnabled").checked = guard.config.voice?.enabled !== false;
+    if (!guardZoneEditor.dirty) syncGuardZoneEditorFromConfig();
     drawGuardOverlay(guard.detections, 0, 0);
   } catch { /* first registration race */ }
 }
@@ -1606,11 +1620,14 @@ async function runPersonInference() {
 function resizeGuardOverlay() {
   const video = $("#guardVideo");
   const canvas = $("#guardOverlay");
-  if (!video.videoWidth) return;
+  if (!video.videoWidth || !video.videoHeight) return;
   if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
   }
+  const stage = $("#guardCameraStage");
+  if (stage) stage.style.aspectRatio = `${video.videoWidth} / ${video.videoHeight}`;
+  drawGuardZoneEditor();
 }
 
 function clearGuardOverlay() {
@@ -2520,16 +2537,17 @@ function showAdminStopWorkAlert(event) {
       <p>${escapeHtml(reason)}</p>
     </div>
     <div class="admin-stop-work-alert-actions">
-      ${event.metadata?.clipUrl ? `<a href="${escapeHtml(event.metadata.clipUrl)}" target="_blank" rel="noopener">전후 영상</a>` : ""}
+      ${event.metadata?.clipUrl ? `<button type="button" data-stop-work-video>전후 영상</button>` : ""}
       <button type="button" data-stop-work-call>현장 무전</button>
       <button type="button" data-stop-work-open>이벤트 확인</button>
     </div>`;
   document.body.append(card);
+  $("[data-stop-work-video]", card)?.addEventListener("click", () => { card.remove(); openStopWorkVideo(event.metadata?.clipUrl); });
   $("[data-stop-work-open]", card)?.addEventListener("click", () => {
     card.remove();
     goToPage("events");
   });
-  $("[data-stop-work-call]", card)?.addEventListener("click", () => initiateAdminCall(event.deviceId));
+  $("[data-stop-work-call]", card)?.addEventListener("click", () => { card.remove(); initiateAdminCall(event.deviceId); });
   setTimeout(() => card.remove(), 30000);
   toast(`작업중지권 발동 · ${event.deviceName || event.deviceId}`, 7000);
   if ("Notification" in window && Notification.permission === "granted") {
@@ -2572,6 +2590,302 @@ async function runGuardTest(kind) {
   };
   if (!guard.active) return toast("먼저 지킴이를 시작해주세요.");
   await triggerGuardEvent(map[kind]);
+}
+
+/* ---------- Field danger-zone editor ---------- */
+
+function clamp01(value) {
+  return Math.max(0, Math.min(1, Number(value) || 0));
+}
+
+function isAxisAlignedRectangle(points = []) {
+  if (points.length !== 4) return false;
+  const epsilon = 0.02;
+  const [a, b, c, d] = points;
+  return Math.abs(a[1] - b[1]) < epsilon && Math.abs(b[0] - c[0]) < epsilon && Math.abs(c[1] - d[1]) < epsilon && Math.abs(d[0] - a[0]) < epsilon;
+}
+
+function defaultGuardRectangle() {
+  return [[0.18, 0.20], [0.82, 0.20], [0.82, 0.82], [0.18, 0.82]];
+}
+
+function syncGuardZoneEditorFromConfig() {
+  const zone = guard.config?.zones?.[0] || defaultConfig().zones[0];
+  const points = Array.isArray(zone.points) ? zone.points.map(([x, y]) => [clamp01(x), clamp01(y)]) : [];
+  guardZoneEditor.points = points;
+  guardZoneEditor.enabled = zone.enabled !== false && guard.config?.rules?.dangerZone !== false;
+  guardZoneEditor.mode = zone.shape === "rectangle" || isAxisAlignedRectangle(points) ? "rectangle" : "polygon";
+  guardZoneEditor.dirty = false;
+  if ($("#guardZoneName")) $("#guardZoneName").value = zone.name || "출입 제한 구역";
+  if ($("#guardZoneSeverity")) $("#guardZoneSeverity").value = zone.severity || "high";
+  if ($("#guardZoneEditorEnabled")) $("#guardZoneEditorEnabled").checked = guardZoneEditor.enabled;
+  if ($("#guardZoneEnabled")) $("#guardZoneEnabled").checked = guardZoneEditor.enabled;
+  updateGuardZoneModeUi();
+  drawGuardZoneEditor();
+}
+
+function updateGuardZoneModeUi() {
+  $$('[data-guard-zone-mode]').forEach((button) => button.classList.toggle("active", button.dataset.guardZoneMode === guardZoneEditor.mode));
+  const rectangle = guardZoneEditor.mode === "rectangle";
+  if ($("#guardZoneEditorHint")) $("#guardZoneEditorHint").textContent = rectangle
+    ? "사각형 모드 · 안쪽을 끌면 이동, 네 모서리를 끌면 크기가 조절됩니다."
+    : "다각형 모드 · 화면을 3곳 이상 터치하세요. 빨간 점도 끌어서 조정할 수 있습니다.";
+  if ($("#guardZoneHelp")) $("#guardZoneHelp").innerHTML = rectangle
+    ? "<b>사각형 사용법</b><span>사각형 안쪽을 마우스·손가락으로 끌어 이동하고, 네 모서리의 원을 끌어 크기를 조절하세요.</span>"
+    : "<b>다각형 사용법</b><span>카메라 화면을 3곳 이상 터치하면 선이 연결됩니다. 빨간 점은 다시 끌어서 위치를 조정할 수 있습니다.</span>";
+  if ($("#guardZoneUndo")) $("#guardZoneUndo").disabled = rectangle || !guardZoneEditor.points.length;
+}
+
+function setGuardZoneMode(mode) {
+  if (!["polygon", "rectangle"].includes(mode)) return;
+  guardZoneEditor.mode = mode;
+  guardZoneEditor.dirty = true;
+  if (mode === "rectangle" && !isAxisAlignedRectangle(guardZoneEditor.points)) guardZoneEditor.points = defaultGuardRectangle();
+  if (mode === "polygon" && isAxisAlignedRectangle(guardZoneEditor.points)) guardZoneEditor.points = [];
+  updateGuardZoneModeUi();
+  drawGuardZoneEditor();
+}
+
+function startGuardZoneEditorLoop() {
+  clearInterval(guardZoneEditor.loopTimer);
+  guardZoneEditor.loopTimer = setInterval(() => {
+    if (state.session?.role === "user" && state.currentPage === "guard" && !document.hidden) drawGuardZoneEditor();
+  }, 220);
+}
+
+function drawGuardZoneEditor() {
+  const canvas = $("#guardZoneCanvas");
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d");
+  const video = $("#guardVideo");
+  ctx.fillStyle = "#06131c";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  let view = { x: 0, y: 0, width: canvas.width, height: canvas.height };
+  if (guard.active && video?.readyState >= 2 && video.videoWidth && video.videoHeight) {
+    const sourceRatio = video.videoWidth / video.videoHeight;
+    const targetRatio = canvas.width / canvas.height;
+    if (sourceRatio > targetRatio) {
+      view.width = canvas.width;
+      view.height = canvas.width / sourceRatio;
+      view.x = 0;
+      view.y = (canvas.height - view.height) / 2;
+    } else {
+      view.height = canvas.height;
+      view.width = canvas.height * sourceRatio;
+      view.y = 0;
+      view.x = (canvas.width - view.width) / 2;
+    }
+    ctx.drawImage(video, 0, 0, video.videoWidth, video.videoHeight, view.x, view.y, view.width, view.height);
+  } else {
+    ctx.fillStyle = "rgba(145,169,178,.92)";
+    ctx.font = "600 24px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("지킴이를 시작하면 현재 카메라 화면이 표시됩니다.", canvas.width / 2, canvas.height / 2);
+  }
+  guardZoneEditor.view = view;
+
+  const points = guardZoneEditor.points;
+  if (!points.length) return;
+  const px = (x) => view.x + x * view.width;
+  const py = (y) => view.y + y * view.height;
+  ctx.beginPath();
+  points.forEach(([x, y], index) => index ? ctx.lineTo(px(x), py(y)) : ctx.moveTo(px(x), py(y)));
+  if (points.length >= 3) ctx.closePath();
+  if (points.length >= 3) {
+    ctx.fillStyle = guardZoneEditor.enabled ? "rgba(255,53,94,.18)" : "rgba(255,157,87,.11)";
+    ctx.fill();
+  }
+  ctx.strokeStyle = guardZoneEditor.enabled ? "#ff355e" : "#ff9d57";
+  ctx.lineWidth = 5;
+  ctx.stroke();
+  const rect = canvas.getBoundingClientRect();
+  const scale = rect.width ? canvas.width / rect.width : 1;
+  const radius = Math.max(10, 13 * scale);
+  points.forEach(([x, y], index) => {
+    ctx.beginPath();
+    ctx.arc(px(x), py(y), radius, 0, Math.PI * 2);
+    ctx.fillStyle = "#fff";
+    ctx.fill();
+    ctx.lineWidth = Math.max(3, 3 * scale);
+    ctx.strokeStyle = "#ff355e";
+    ctx.stroke();
+    ctx.fillStyle = "#07131d";
+    ctx.font = `${Math.max(12, 11 * scale)}px sans-serif`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(String(index + 1), px(x), py(y) + 1);
+  });
+}
+
+function guardZonePointerPosition(event) {
+  const canvas = $("#guardZoneCanvas");
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = canvas.width / Math.max(1, rect.width);
+  const scaleY = canvas.height / Math.max(1, rect.height);
+  const canvasX = (event.clientX - rect.left) * scaleX;
+  const canvasY = (event.clientY - rect.top) * scaleY;
+  const view = guardZoneEditor.view || { x: 0, y: 0, width: canvas.width, height: canvas.height };
+  const inside = canvasX >= view.x && canvasX <= view.x + view.width && canvasY >= view.y && canvasY <= view.y + view.height;
+  return {
+    x: clamp01((canvasX - view.x) / Math.max(1, view.width)),
+    y: clamp01((canvasY - view.y) / Math.max(1, view.height)),
+    rect,
+    view,
+    inside,
+  };
+}
+
+function guardZoneHitVertex(position) {
+  const contentCssWidth = position.rect.width * (position.view.width / 1280);
+  const contentCssHeight = position.rect.height * (position.view.height / 720);
+  const radiusX = 26 / Math.max(220, contentCssWidth);
+  const radiusY = 26 / Math.max(140, contentCssHeight);
+  let best = -1;
+  let bestScore = Infinity;
+  guardZoneEditor.points.forEach(([x, y], index) => {
+    const score = ((position.x - x) / radiusX) ** 2 + ((position.y - y) / radiusY) ** 2;
+    if (score <= 1 && score < bestScore) { best = index; bestScore = score; }
+  });
+  return best;
+}
+
+function resizeGuardRectangle(index, position) {
+  const points = guardZoneEditor.points;
+  if (points.length !== 4) return;
+  const opposite = points[(index + 2) % 4];
+  const minSize = 0.05;
+  let x = position.x, y = position.y;
+  if (index === 0) { x = Math.min(x, opposite[0] - minSize); y = Math.min(y, opposite[1] - minSize); guardZoneEditor.points = [[x,y],[opposite[0],y],[opposite[0],opposite[1]],[x,opposite[1]]]; }
+  if (index === 1) { x = Math.max(x, opposite[0] + minSize); y = Math.min(y, opposite[1] - minSize); guardZoneEditor.points = [[opposite[0],y],[x,y],[x,opposite[1]],[opposite[0],opposite[1]]]; }
+  if (index === 2) { x = Math.max(x, opposite[0] + minSize); y = Math.max(y, opposite[1] + minSize); guardZoneEditor.points = [[opposite[0],opposite[1]],[x,opposite[1]],[x,y],[opposite[0],y]]; }
+  if (index === 3) { x = Math.min(x, opposite[0] - minSize); y = Math.max(y, opposite[1] + minSize); guardZoneEditor.points = [[x,opposite[1]],[opposite[0],opposite[1]],[opposite[0],y],[x,y]]; }
+  guardZoneEditor.points = guardZoneEditor.points.map(([px, py]) => [clamp01(px), clamp01(py)]);
+}
+
+function moveGuardZone(deltaX, deltaY, originPoints) {
+  if (!originPoints.length) return;
+  const xs = originPoints.map(([x]) => x), ys = originPoints.map(([, y]) => y);
+  const dx = Math.max(-Math.min(...xs), Math.min(1 - Math.max(...xs), deltaX));
+  const dy = Math.max(-Math.min(...ys), Math.min(1 - Math.max(...ys), deltaY));
+  guardZoneEditor.points = originPoints.map(([x, y]) => [x + dx, y + dy]);
+}
+
+function onGuardZonePointerDown(event) {
+  const canvas = $("#guardZoneCanvas");
+  if (!canvas) return;
+  event.preventDefault();
+  try { canvas.setPointerCapture(event.pointerId); } catch { /* noop */ }
+  const position = guardZonePointerPosition(event);
+  if (!position.inside) { guardZoneEditor.pointerStart = null; guardZoneEditor.drag = null; return; }
+  const vertex = guardZoneHitVertex(position);
+  guardZoneEditor.pointerStart = { x: position.x, y: position.y };
+  guardZoneEditor.suppressAdd = false;
+  if (vertex >= 0) {
+    guardZoneEditor.drag = { type: "vertex", index: vertex, originPoints: guardZoneEditor.points.map((point) => [...point]) };
+  } else if (guardZoneEditor.mode === "rectangle" && guardZoneEditor.points.length >= 3 && pointInPolygon([position.x, position.y], guardZoneEditor.points)) {
+    guardZoneEditor.drag = { type: "move", startX: position.x, startY: position.y, originPoints: guardZoneEditor.points.map((point) => [...point]) };
+  } else {
+    guardZoneEditor.drag = null;
+  }
+}
+
+function onGuardZonePointerMove(event) {
+  if (!guardZoneEditor.pointerStart) return;
+  const position = guardZonePointerPosition(event);
+  const moved = Math.hypot(position.x - guardZoneEditor.pointerStart.x, position.y - guardZoneEditor.pointerStart.y);
+  if (moved > 0.008) guardZoneEditor.suppressAdd = true;
+  if (!guardZoneEditor.drag) return;
+  event.preventDefault();
+  guardZoneEditor.dirty = true;
+  if (guardZoneEditor.drag.type === "move") moveGuardZone(position.x - guardZoneEditor.drag.startX, position.y - guardZoneEditor.drag.startY, guardZoneEditor.drag.originPoints);
+  else if (guardZoneEditor.drag.type === "vertex") {
+    if (guardZoneEditor.mode === "rectangle") resizeGuardRectangle(guardZoneEditor.drag.index, position);
+    else guardZoneEditor.points[guardZoneEditor.drag.index] = [position.x, position.y];
+  }
+  drawGuardZoneEditor();
+}
+
+function onGuardZonePointerUp(event) {
+  if (!guardZoneEditor.pointerStart) return;
+  const position = guardZonePointerPosition(event);
+  if (guardZoneEditor.mode === "polygon" && !guardZoneEditor.drag && !guardZoneEditor.suppressAdd) {
+    guardZoneEditor.points.push([position.x, position.y]);
+    guardZoneEditor.dirty = true;
+  }
+  guardZoneEditor.drag = null;
+  guardZoneEditor.pointerStart = null;
+  guardZoneEditor.suppressAdd = false;
+  updateGuardZoneModeUi();
+  drawGuardZoneEditor();
+}
+
+function resetGuardZoneEditor() {
+  guardZoneEditor.points = guardZoneEditor.mode === "rectangle" ? defaultGuardRectangle() : [];
+  guardZoneEditor.dirty = true;
+  updateGuardZoneModeUi();
+  drawGuardZoneEditor();
+}
+
+function undoGuardZonePoint() {
+  if (guardZoneEditor.mode !== "polygon" || !guardZoneEditor.points.length) return;
+  guardZoneEditor.points.pop();
+  guardZoneEditor.dirty = true;
+  updateGuardZoneModeUi();
+  drawGuardZoneEditor();
+}
+
+async function saveGuardZoneFromUser() {
+  if (!guard.active) return toast("현재 카메라 화면에 맞춰 설정하려면 먼저 지킴이를 시작해주세요.", 4500);
+  const enabled = $("#guardZoneEditorEnabled")?.checked === true;
+  if (enabled && guardZoneEditor.points.length < 3) return toast("위험구역을 사용하려면 점을 3개 이상 지정해주세요.");
+  const payload = {
+    deviceId: getGuardDeviceId(),
+    enabled,
+    zone: {
+      id: "zone-main",
+      name: $("#guardZoneName").value.trim() || "출입 제한 구역",
+      severity: $("#guardZoneSeverity").value,
+      shape: guardZoneEditor.mode,
+      points: guardZoneEditor.points.map(([x, y]) => [Number(clamp01(x).toFixed(5)), Number(clamp01(y).toFixed(5))]),
+    },
+  };
+  const button = $("#guardZoneSave");
+  button.disabled = true;
+  button.textContent = "저장 중...";
+  try {
+    const result = await api("/api/guard/zone", { method: "PUT", body: JSON.stringify(payload) });
+    guard.config = result.config || guard.config;
+    guardZoneEditor.enabled = enabled;
+    guardZoneEditor.dirty = false;
+    $("#guardZoneEnabled").checked = enabled;
+    const saved = JSON.parse(localStorage.getItem("ssg-guard-profile") || "{}");
+    localStorage.setItem("ssg-guard-profile", JSON.stringify({ ...saved, zoneEnabled: enabled }));
+    drawGuardOverlay(guard.detections, guard.latestSourceWidth, guard.latestSourceHeight, [], guard.latestAssessments);
+    toast(enabled ? "현장 위험구역을 저장하고 감지를 시작했습니다." : "현장 위험구역 감지를 해제했습니다.", 4500);
+  } catch (error) {
+    toast(`위험구역 저장 실패: ${error.message}`, 5500);
+  } finally {
+    button.disabled = false;
+    button.textContent = "위험구역 저장";
+  }
+}
+
+function openStopWorkVideo(url) {
+  if (!url) return toast("저장된 전후 영상이 없습니다.");
+  const modal = $("#stopWorkVideoModal");
+  const player = $("#stopWorkVideoPlayer");
+  player.src = url;
+  modal.hidden = false;
+  player.play().catch(() => {});
+}
+
+function closeStopWorkVideo() {
+  const modal = $("#stopWorkVideoModal");
+  const player = $("#stopWorkVideoPlayer");
+  try { player.pause(); } catch { /* noop */ }
+  player.removeAttribute("src");
+  player.load();
+  modal.hidden = true;
 }
 
 /* ---------- Zone and rules ---------- */
@@ -2750,6 +3064,8 @@ function exportEvents() {
 
 function handleGuardZoneToggle() {
   const enabled = $("#guardZoneEnabled").checked === true;
+  if ($("#guardZoneEditorEnabled")) $("#guardZoneEditorEnabled").checked = enabled;
+  guardZoneEditor.enabled = enabled;
   const saved = JSON.parse(localStorage.getItem("ssg-guard-profile") || "{}");
   localStorage.setItem("ssg-guard-profile", JSON.stringify({ ...saved, zoneEnabled: enabled }));
   guard.streaks.set("zone", 0);
@@ -2770,12 +3086,33 @@ function bindEvents() {
   [$("#guardStartButton"), $("#guardTopButton")].forEach((button) => button.addEventListener("click", toggleGuard));
   $("#guardSaveProfile").addEventListener("click", saveGuardProfile);
   $("#guardZoneEnabled").addEventListener("change", handleGuardZoneToggle);
+  $$("[data-guard-zone-mode]").forEach((button) => button.addEventListener("click", () => setGuardZoneMode(button.dataset.guardZoneMode)));
+  $("#guardZoneEditorEnabled")?.addEventListener("change", () => {
+    const enabled = $("#guardZoneEditorEnabled").checked;
+    guardZoneEditor.enabled = enabled;
+    guardZoneEditor.dirty = true;
+    $("#guardZoneEnabled").checked = enabled;
+    handleGuardZoneToggle();
+    drawGuardZoneEditor();
+  });
+  $("#guardZoneUndo")?.addEventListener("click", undoGuardZonePoint);
+  $("#guardZoneReset")?.addEventListener("click", resetGuardZoneEditor);
+  $("#guardZoneSave")?.addEventListener("click", saveGuardZoneFromUser);
+  $("#guardZoneName")?.addEventListener("input", () => { guardZoneEditor.dirty = true; });
+  $("#guardZoneSeverity")?.addEventListener("change", () => { guardZoneEditor.dirty = true; });
+  const guardZoneCanvas = $("#guardZoneCanvas");
+  guardZoneCanvas?.addEventListener("pointerdown", onGuardZonePointerDown, { passive: false });
+  guardZoneCanvas?.addEventListener("pointermove", onGuardZonePointerMove, { passive: false });
+  guardZoneCanvas?.addEventListener("pointerup", onGuardZonePointerUp, { passive: false });
+  guardZoneCanvas?.addEventListener("pointercancel", () => { guardZoneEditor.drag = null; guardZoneEditor.pointerStart = null; });
   $("#guardCameraSelect").addEventListener("change", restartGuardCamera);
   $("#guardCallAdminButton").addEventListener("click", initiateGuardCall);
   $("#stopWorkButton")?.addEventListener("click", beginStopWorkRequest);
   $("#submitStopWork")?.addEventListener("click", submitStopWorkRequest);
   $("#cancelStopWork")?.addEventListener("click", closeStopWorkModal);
   $("#stopWorkModalClose")?.addEventListener("click", closeStopWorkModal);
+  $("#stopWorkVideoClose")?.addEventListener("click", closeStopWorkVideo);
+  $("#stopWorkVideoModal")?.addEventListener("click", (event) => { if (event.target === event.currentTarget) closeStopWorkVideo(); });
   $("#guardTrainingWorker").addEventListener("change", () => updateTrainingFeedback());
   $("#saveTrainingSample").addEventListener("click", () => saveTrainingSample());
   $("#autoTrainingStart")?.addEventListener("click", startAutoTraining);
@@ -2785,7 +3122,7 @@ function bindEvents() {
   }));
   $$('[data-guard-test]').forEach((button) => button.addEventListener("click", () => runGuardTest(button.dataset.guardTest)));
   $("#guardVideo").addEventListener("loadedmetadata", resizeGuardOverlay);
-  addEventListener("resize", () => { resizeGuardOverlay(); if (state.currentPage === "zones") drawZoneCanvas(); });
+  addEventListener("resize", () => { resizeGuardOverlay(); drawGuardZoneEditor(); if (state.currentPage === "zones") drawZoneCanvas(); });
 
   [$("#qrOpenButton"), $("#heroQrButton"), $("#deviceQrButton"), $("#settingsQrButton")].forEach((button) => button?.addEventListener("click", showQrModal));
   $("#copyGuardLink").addEventListener("click", copyGuardLink);
@@ -2847,6 +3184,8 @@ async function init() {
   bindEvents();
   renderRuleGroups();
   loadGuardProfile();
+  updateGuardZoneModeUi();
+  startGuardZoneEditorLoop();
   if ($("#trainingSavedCount")) $("#trainingSavedCount").textContent = `${guard.trainingSavedCount}건`;
   refreshTrainingStorageStats();
   $("#apiOrigin").textContent = location.origin;
