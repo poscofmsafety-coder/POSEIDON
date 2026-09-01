@@ -7,3 +7,14 @@ TURN_ICE_SERVERS=[]
 
 # Optional: override YOLO11n person detection ONNX source
 YOLO11N_MODEL_URL=https://huggingface.co/webnn/yolo11n/resolve/main/onnx/yolo11n.onnx
+
+# Optional stop-work external notifications
+ADMIN_EMAIL=
+EMAIL_FROM=
+NOTIFY_WEBHOOK_URL=
+ADMIN_PHONE=
+TWILIO_FROM_NUMBER=
+# Put these as Cloudflare secrets in production:
+RESEND_API_KEY=
+TWILIO_ACCOUNT_SID=
+TWILIO_AUTH_TOKEN=

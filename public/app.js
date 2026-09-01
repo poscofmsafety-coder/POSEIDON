@@ -1,4 +1,4 @@
-const POSEIDON_BUILD = "6.1.0";
+const POSEIDON_BUILD = "6.2.0";
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -115,6 +115,8 @@ const state = {
   zoneConfig: null,
   zoneBackground: null,
   rtc: { relayConfigured: false, iceServerCount: 1 },
+  stopWorkSeenIds: new Set(),
+  stopWorkAlertInitialized: false,
 };
 
 const realtime = {
@@ -193,6 +195,16 @@ const callState = {
   remoteAudioBlocked: false,
 };
 
+const stopWorkState = {
+  recorder: null,
+  mimeType: "",
+  rollingChunks: [],
+  headerChunk: null,
+  incident: null,
+  countdownTimer: null,
+  maxPreMs: 10500,
+};
+
 function escapeHtml(value) {
   return String(value ?? "")
     .replaceAll("&", "&amp;")
@@ -229,7 +241,8 @@ function toast(message, duration = 3200) {
 
 async function api(path, options = {}) {
   const headers = new Headers(options.headers || {});
-  if (options.body && !(options.body instanceof Blob) && !(options.body instanceof ArrayBuffer) && !headers.has("content-type")) {
+  const isFormDataBody = typeof FormData !== "undefined" && options.body instanceof FormData;
+  if (options.body && !isFormDataBody && !(options.body instanceof Blob) && !(options.body instanceof ArrayBuffer) && !headers.has("content-type")) {
     headers.set("content-type", "application/json");
   }
   const response = await fetch(path, { ...options, headers, credentials: "include" });
@@ -359,6 +372,7 @@ async function loadDashboard(silent = false) {
     state.summary = summary;
     state.devices = devices;
     state.events = events;
+    checkAdminStopWorkAlerts(events);
     renderKpis();
     reconcileDeviceCards($("#overviewDevices"), false);
     reconcileDeviceCards($("#liveDevices"), true);
@@ -503,7 +517,7 @@ function renderEventTable() {
   const categoryFilter = $("#eventCategoryFilter")?.value || "";
   const severityFilter = $("#eventSeverityFilter")?.value || "";
   const items = state.events.filter((event) => (!deviceFilter || event.deviceId === deviceFilter) && (!categoryFilter || event.category === categoryFilter) && (!severityFilter || event.severity === severityFilter));
-  body.innerHTML = items.map((event) => `<tr><td>${formatDate(event.occurredAt)}</td><td>${escapeHtml(event.deviceName)}</td><td>${escapeHtml(event.category)}</td><td><span class="severity-pill ${escapeHtml(event.severity)}">${severityLabel(event.severity)}</span></td><td>${event.snapshotUrl ? `<a href="${escapeHtml(event.snapshotUrl)}" target="_blank" rel="noopener">${escapeHtml(event.message)}</a>` : escapeHtml(event.message)}</td><td>${escapeHtml(event.status)}</td><td><div class="event-actions">${event.acknowledged ? "<span>완료</span>" : `<button class="table-action" data-event-ack="${escapeHtml(event.id)}">확인 완료</button>`}<button class="table-action danger-action" data-event-delete="${escapeHtml(event.id)}">삭제</button></div></td></tr>`).join("") || `<tr><td colspan="7">조회된 이벤트가 없습니다.</td></tr>`;
+  body.innerHTML = items.map((event) => `<tr class="${event.type === "STOP_WORK_REQUEST" ? "stop-work-event-row" : ""}"><td>${formatDate(event.occurredAt)}</td><td>${escapeHtml(event.deviceName)}</td><td>${escapeHtml(event.category)}</td><td><span class="severity-pill ${escapeHtml(event.severity)}">${severityLabel(event.severity)}</span></td><td>${eventMessageHtml(event)}</td><td>${escapeHtml(event.status)}</td><td><div class="event-actions">${event.acknowledged ? "<span>완료</span>" : `<button class="table-action" data-event-ack="${escapeHtml(event.id)}">확인 완료</button>`}<button class="table-action danger-action" data-event-delete="${escapeHtml(event.id)}">삭제</button></div></td></tr>`).join("") || `<tr><td colspan="7">조회된 이벤트가 없습니다.</td></tr>`;
   $$('[data-event-ack]', body).forEach((button) => button.addEventListener("click", () => acknowledgeEvent(button.dataset.eventAck)));
   $$('[data-event-delete]', body).forEach((button) => button.addEventListener("click", () => deleteEvent(button.dataset.eventDelete)));
 }
@@ -570,7 +584,7 @@ async function loadEventRetentionSettings() {
     state.eventRetention = data;
     $("#eventRetentionEnabled").checked = data.enabled !== false;
     $("#eventRetentionDays").value = String(data.days || 30);
-    $("#eventRetentionStats").textContent = `현재 ${data.eventCount || 0}건 · 스냅숏 ${formatTrainingBytes(data.snapshotBytes || 0)} · 매일 자동 정리`;
+    $("#eventRetentionStats").textContent = `현재 ${data.eventCount || 0}건 · 이벤트 미디어 ${formatTrainingBytes(data.snapshotBytes || 0)} · 매일 자동 정리`;
   } catch (error) {
     $("#eventRetentionStats").textContent = `보관설정 조회 실패: ${error.message}`;
   }
@@ -1326,6 +1340,7 @@ async function startGuard() {
     guard.active = true;
     guard.starting = false;
     guard.currentRisk = "정상";
+    startStopWorkRollingBuffer();
     await registerGuard();
     await fetchGuardConfig();
     guard.signal = createSignal(getGuardDeviceId(), "guard", handleGuardSignalMessage);
@@ -1345,6 +1360,7 @@ async function startGuard() {
 async function stopGuard() {
   guard.active = false;
   guard.starting = false;
+  stopStopWorkRollingBuffer();
   stopGuardTimers();
   guard.signal?.close();
   guard.signal = null;
@@ -1768,13 +1784,29 @@ function buildPpeAssessments(detections, sourceWidth, sourceHeight, yolo11Person
         det.height <= anchor.height * 0.62 &&
         det.y <= anchor.y + anchor.height * 0.55
       );
-    const displayBox = head || {
-      x: anchor.x + anchor.width * 0.18,
-      y: anchor.y + anchor.height * 0.02,
-      width: anchor.width * 0.64,
-      height: Math.min(anchor.height * 0.38, anchor.width * 0.72),
-      score: anchor.score,
-      label: "FACE-ROI",
+    // 화면 표시 ROI는 안전모뿐 아니라 보안경·마스크까지 한 번에 보이도록
+    // 머리 꼭대기부터 턱 아래까지 넉넉히 포함합니다. 내부 person anchor는 그대로 유지합니다.
+    const roiBase = head || anchor;
+    const roi = head
+      ? {
+          x: roiBase.x - roiBase.width * 0.08,
+          y: roiBase.y - roiBase.height * 0.05,
+          width: roiBase.width * 1.16,
+          height: roiBase.height * 1.62,
+        }
+      : {
+          x: anchor.x + anchor.width * 0.14,
+          y: anchor.y + anchor.height * 0.01,
+          width: anchor.width * 0.72,
+          height: Math.min(anchor.height * 0.56, anchor.width * 0.98),
+        };
+    const displayBox = {
+      x: Math.max(0, roi.x),
+      y: Math.max(0, roi.y),
+      width: Math.max(8, Math.min(sourceWidth - Math.max(0, roi.x), roi.width)),
+      height: Math.max(8, Math.min(sourceHeight - Math.max(0, roi.y), roi.height)),
+      score: roiBase.score,
+      label: "HEAD-FACE-MASK-ROI",
     };
 
     return {
@@ -2265,6 +2297,251 @@ function captureGuardSnapshot(quality = 0.68, maxWidth = 960) {
   return canvas.toDataURL("image/jpeg", quality);
 }
 
+function chooseStopWorkMimeType() {
+  if (!("MediaRecorder" in window)) return "";
+  const candidates = [
+    "video/webm;codecs=vp8",
+    "video/webm",
+    "video/mp4;codecs=avc1.42E01E",
+    "video/mp4",
+  ];
+  return candidates.find((type) => MediaRecorder.isTypeSupported?.(type)) || "";
+}
+
+function startStopWorkRollingBuffer() {
+  stopStopWorkRollingBuffer(false);
+  if (!guard.stream || !("MediaRecorder" in window)) {
+    updateStopWorkRecordStatus("이 브라우저는 사전 영상 버퍼를 지원하지 않습니다. 요청 내용은 정상 전송됩니다.");
+    return;
+  }
+  const videoTracks = guard.stream.getVideoTracks().filter((track) => track.readyState === "live");
+  if (!videoTracks.length) return;
+  try {
+    const mimeType = chooseStopWorkMimeType();
+    const recorderStream = new MediaStream(videoTracks.map((track) => track.clone()));
+    const options = {
+      videoBitsPerSecond: isMobile() ? 180000 : 260000,
+      ...(mimeType ? { mimeType } : {}),
+    };
+    const recorder = new MediaRecorder(recorderStream, options);
+    stopWorkState.recorder = recorder;
+    stopWorkState.mimeType = recorder.mimeType || mimeType || "video/webm";
+    stopWorkState.rollingChunks = [];
+    stopWorkState.headerChunk = null;
+    recorder.ondataavailable = (event) => {
+      if (!event.data?.size) return;
+      const now = Date.now();
+      if (!stopWorkState.headerChunk) stopWorkState.headerChunk = event.data;
+      const entry = { at: now, blob: event.data };
+      stopWorkState.rollingChunks.push(entry);
+      stopWorkState.rollingChunks = stopWorkState.rollingChunks.filter((item) => item.at >= now - stopWorkState.maxPreMs);
+      if (stopWorkState.incident && now >= stopWorkState.incident.clickedAt) {
+        stopWorkState.incident.postChunks.push(event.data);
+      }
+    };
+    recorder.onerror = (event) => {
+      console.warn("stop-work recorder", event?.error || event);
+      updateStopWorkRecordStatus("사전 영상 기록을 사용할 수 없습니다. 작업중지 요청은 계속 가능합니다.");
+    };
+    recorder.onstop = () => recorderStream.getTracks().forEach((track) => track.stop());
+    recorder.start(1000);
+  } catch (error) {
+    console.warn("stop-work rolling buffer start", error);
+    stopWorkState.recorder = null;
+  }
+}
+
+function stopStopWorkRollingBuffer(clearIncident = true) {
+  clearInterval(stopWorkState.countdownTimer);
+  stopWorkState.countdownTimer = null;
+  if (stopWorkState.recorder && stopWorkState.recorder.state !== "inactive") {
+    try { stopWorkState.recorder.stop(); } catch { /* noop */ }
+  }
+  stopWorkState.recorder = null;
+  stopWorkState.rollingChunks = [];
+  stopWorkState.headerChunk = null;
+  if (clearIncident) stopWorkState.incident = null;
+}
+
+function updateStopWorkRecordStatus(text, tone = "") {
+  const target = $("#stopWorkRecordStatus");
+  if (!target) return;
+  target.textContent = text;
+  target.dataset.tone = tone;
+}
+
+function beginStopWorkRequest() {
+  if (!guard.active) return toast("작업중지권 기록을 위해 먼저 지킴이를 시작해주세요.", 4500);
+  if (stopWorkState.incident?.recording) return toast("작업중지권 영상 기록이 진행 중입니다.");
+  unlockAudio();
+  const saved = JSON.parse(localStorage.getItem("poseidon-stop-work-reporter") || "{}");
+  $("#stopWorkReporterName").value = saved.name || "";
+  $("#stopWorkReporterContact").value = saved.contact || "";
+  $("#stopWorkReason").value = "";
+  $("#stopWorkModal").hidden = false;
+  $("#submitStopWork").disabled = true;
+
+  const clickedAt = Date.now();
+  const preEntries = stopWorkState.rollingChunks.filter((item) => item.at >= clickedAt - 10000);
+  stopWorkState.incident = {
+    clickedAt,
+    preChunks: preEntries.map((item) => item.blob),
+    postChunks: [],
+    clip: null,
+    recording: Boolean(stopWorkState.recorder && stopWorkState.recorder.state === "recording"),
+    snapshotBase64: captureGuardSnapshot(0.62, 840),
+  };
+
+  if (!stopWorkState.incident.recording) {
+    updateStopWorkRecordStatus("영상 버퍼를 사용할 수 없어 사유만 즉시 전송할 수 있습니다.", "warn");
+    $("#submitStopWork").disabled = false;
+    return;
+  }
+
+  let remaining = 10;
+  updateStopWorkRecordStatus(`버튼 누르기 전 최대 10초 확보 · 이후 영상 ${remaining}초 기록 중`, "recording");
+  clearInterval(stopWorkState.countdownTimer);
+  stopWorkState.countdownTimer = setInterval(() => {
+    remaining -= 1;
+    if (remaining > 0) updateStopWorkRecordStatus(`버튼 누르기 전 최대 10초 확보 · 이후 영상 ${remaining}초 기록 중`, "recording");
+  }, 1000);
+  setTimeout(finalizeStopWorkClip, 10000);
+}
+
+function finalizeStopWorkClip() {
+  clearInterval(stopWorkState.countdownTimer);
+  stopWorkState.countdownTimer = null;
+  const incident = stopWorkState.incident;
+  if (!incident) return;
+  incident.recording = false;
+  const chunks = [...incident.preChunks, ...incident.postChunks];
+  if (stopWorkState.headerChunk && chunks.length && !chunks.includes(stopWorkState.headerChunk)) chunks.unshift(stopWorkState.headerChunk);
+  if (chunks.length) {
+    let clip = new Blob(chunks, { type: stopWorkState.mimeType || chunks[0]?.type || "video/webm" });
+    // D1 이벤트 미디어 저장 공간을 보호하기 위해 1.4MB 안에서 업로드합니다.
+    if (clip.size <= 1_400_000) {
+      incident.clip = clip;
+      updateStopWorkRecordStatus(`사고 전·후 영상 준비 완료 · ${formatTrainingBytes(clip.size)}`, "ready");
+    } else {
+      incident.clip = null;
+      updateStopWorkRecordStatus(`영상이 ${formatTrainingBytes(clip.size)}로 커서 서버 저장은 생략됩니다. 사유와 스냅숏은 전송됩니다.`, "warn");
+    }
+  } else {
+    updateStopWorkRecordStatus("영상 기록은 없지만 사유와 현재 화면은 전송할 수 있습니다.", "warn");
+  }
+  $("#submitStopWork").disabled = false;
+}
+
+function closeStopWorkModal() {
+  clearInterval(stopWorkState.countdownTimer);
+  stopWorkState.countdownTimer = null;
+  stopWorkState.incident = null;
+  $("#stopWorkModal").hidden = true;
+}
+
+async function submitStopWorkRequest() {
+  const incident = stopWorkState.incident;
+  if (!incident) return;
+  if (incident.recording) return toast("사고 이후 10초 영상을 기록 중입니다. 잠시만 기다려주세요.", 4500);
+  const reason = $("#stopWorkReason").value.trim();
+  const reporterName = $("#stopWorkReporterName").value.trim();
+  const reporterContact = $("#stopWorkReporterContact").value.trim();
+  if (!reason) return toast("작업중지 사유를 작성해주세요.");
+  if (!reporterName) return toast("발동자 이름을 입력해주세요.");
+
+  const button = $("#submitStopWork");
+  button.disabled = true;
+  button.textContent = "관리자에게 전송 중...";
+  try {
+    const form = new FormData();
+    form.append("deviceId", getGuardDeviceId());
+    form.append("reporterName", reporterName);
+    form.append("reporterContact", reporterContact);
+    form.append("reason", reason);
+    form.append("occurredAt", new Date(incident.clickedAt).toISOString());
+    if (incident.snapshotBase64) form.append("snapshotBase64", incident.snapshotBase64);
+    if (incident.clip) {
+      const ext = (incident.clip.type || "").includes("mp4") ? "mp4" : "webm";
+      form.append("clip", incident.clip, `stop-work-${Date.now()}.${ext}`);
+    }
+    const result = await api("/api/stop-work", { method: "POST", body: form });
+    localStorage.setItem("poseidon-stop-work-reporter", JSON.stringify({ name: reporterName, contact: reporterContact }));
+    closeStopWorkModal();
+    showGuardWarning("작업중지권이 관리자에게 접수되었습니다.");
+    speak("작업중지 요청이 관리자에게 접수되었습니다.");
+    toast(result.notificationSummary || "작업중지권을 관리자에게 전송했습니다.", 6000);
+    // 접수 직후 현장과 관제센터가 바로 대화할 수 있도록 무전 호출도 시도합니다.
+    if (callState.status === "idle") setTimeout(() => initiateGuardCall(), 500);
+  } catch (error) {
+    toast(`작업중지권 전송 실패: ${error.message}`, 6000);
+  } finally {
+    button.disabled = false;
+    button.textContent = "작업중지 요청 보내기";
+  }
+}
+
+function eventMessageHtml(event) {
+  const links = [];
+  if (event.snapshotUrl) links.push(`<a href="${escapeHtml(event.snapshotUrl)}" target="_blank" rel="noopener">현장 사진</a>`);
+  if (event.metadata?.clipUrl) links.push(`<a href="${escapeHtml(event.metadata.clipUrl)}" target="_blank" rel="noopener">전후 영상</a>`);
+  const details = event.type === "STOP_WORK_REQUEST"
+    ? `<small class="stop-work-event-detail">발동자 ${escapeHtml(event.metadata?.reporterName || "-")} · ${escapeHtml(event.metadata?.reporterContact || "연락처 미입력")}</small>`
+    : "";
+  return `<div class="event-message-cell"><b>${escapeHtml(event.message)}</b>${details}${links.length ? `<div class="event-media-links">${links.join("")}</div>` : ""}</div>`;
+}
+
+function checkAdminStopWorkAlerts(events = []) {
+  if (state.session?.role !== "admin") return;
+  const stopEvents = events.filter((event) => event.type === "STOP_WORK_REQUEST");
+  if (!state.stopWorkAlertInitialized) {
+    state.stopWorkAlertInitialized = true;
+    stopEvents.forEach((event) => state.stopWorkSeenIds.add(event.id));
+    const latestOpen = stopEvents.find((event) => !event.acknowledged);
+    if (latestOpen) showAdminStopWorkAlert(latestOpen);
+    return;
+  }
+  for (const event of [...stopEvents].reverse()) {
+    if (state.stopWorkSeenIds.has(event.id)) continue;
+    state.stopWorkSeenIds.add(event.id);
+    showAdminStopWorkAlert(event);
+  }
+}
+
+function showAdminStopWorkAlert(event) {
+  $(".admin-stop-work-alert")?.remove();
+  const card = document.createElement("aside");
+  card.className = "admin-stop-work-alert";
+  const reason = event.metadata?.reason || event.message || "작업중지 요청";
+  card.innerHTML = `
+    <div class="admin-stop-work-alert-icon">!</div>
+    <div class="admin-stop-work-alert-copy">
+      <span>긴급 · 작업중지권 발동</span>
+      <b>${escapeHtml(event.deviceName || event.deviceId)}</b>
+      <p>${escapeHtml(reason)}</p>
+    </div>
+    <div class="admin-stop-work-alert-actions">
+      ${event.metadata?.clipUrl ? `<a href="${escapeHtml(event.metadata.clipUrl)}" target="_blank" rel="noopener">전후 영상</a>` : ""}
+      <button type="button" data-stop-work-call>현장 무전</button>
+      <button type="button" data-stop-work-open>이벤트 확인</button>
+    </div>`;
+  document.body.append(card);
+  $("[data-stop-work-open]", card)?.addEventListener("click", () => {
+    card.remove();
+    goToPage("events");
+  });
+  $("[data-stop-work-call]", card)?.addEventListener("click", () => initiateAdminCall(event.deviceId));
+  setTimeout(() => card.remove(), 30000);
+  toast(`작업중지권 발동 · ${event.deviceName || event.deviceId}`, 7000);
+  if ("Notification" in window && Notification.permission === "granted") {
+    try {
+      new Notification("POSEIDON 작업중지권 발동", {
+        body: `${event.deviceName || event.deviceId} · ${reason}`,
+        tag: `stop-work-${event.id}`,
+      });
+    } catch { /* noop */ }
+  }
+}
+
 async function uploadGuardPreview() {
   if (!guard.active) return;
   const dataUrl = captureGuardSnapshot(0.48, 640);
@@ -2495,6 +2772,10 @@ function bindEvents() {
   $("#guardZoneEnabled").addEventListener("change", handleGuardZoneToggle);
   $("#guardCameraSelect").addEventListener("change", restartGuardCamera);
   $("#guardCallAdminButton").addEventListener("click", initiateGuardCall);
+  $("#stopWorkButton")?.addEventListener("click", beginStopWorkRequest);
+  $("#submitStopWork")?.addEventListener("click", submitStopWorkRequest);
+  $("#cancelStopWork")?.addEventListener("click", closeStopWorkModal);
+  $("#stopWorkModalClose")?.addEventListener("click", closeStopWorkModal);
   $("#guardTrainingWorker").addEventListener("change", () => updateTrainingFeedback());
   $("#saveTrainingSample").addEventListener("click", () => saveTrainingSample());
   $("#autoTrainingStart")?.addEventListener("click", startAutoTraining);
@@ -2554,6 +2835,7 @@ function bindEvents() {
 
   addEventListener("beforeunload", () => {
     if (guard.autoTraining.active) stopAutoTraining("페이지 종료");
+    stopStopWorkRollingBuffer();
     if (guard.active) navigator.sendBeacon?.("/api/agents/offline", new Blob([JSON.stringify({ deviceId: getGuardDeviceId() })], { type: "application/json" }));
   });
   document.addEventListener("visibilitychange", () => {

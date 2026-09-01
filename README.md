@@ -62,3 +62,32 @@ POSEIDON/
 - 학습용 crop은 최대 512px, JPEG quality 0.62로 저장
 - `/api/training/stats`에서 학습 이미지 사용량 표시
 - 무료 D1 500MB/DB를 고려해 학습이미지 300MB를 소프트 상한으로 사용
+
+
+## V6.2 작업중지권 알림 설정
+
+작업중지권은 외부 서비스 설정 없이도 관리자 대시보드와 이벤트 센터에 즉시 접수됩니다.
+
+선택적으로 이메일/문자/Webhook을 연결할 수 있습니다.
+
+### 이메일
+Cloudflare Secret:
+- `RESEND_API_KEY`
+
+환경값:
+- `ADMIN_EMAIL`
+- `EMAIL_FROM`
+
+### 문자
+Cloudflare Secret:
+- `TWILIO_ACCOUNT_SID`
+- `TWILIO_AUTH_TOKEN`
+
+환경값:
+- `TWILIO_FROM_NUMBER`
+- `ADMIN_PHONE`
+
+### Webhook
+- `NOTIFY_WEBHOOK_URL`
+
+운영에서는 API Key/Token을 GitHub에 커밋하지 말고 Cloudflare Secret으로 등록하세요.

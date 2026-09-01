@@ -60,12 +60,27 @@ const SCHEMA = [
     reviewed INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL
   )`,
+  `CREATE TABLE IF NOT EXISTS stop_work_requests (
+    id TEXT PRIMARY KEY,
+    event_id TEXT NOT NULL,
+    device_id TEXT NOT NULL,
+    reporter_name TEXT NOT NULL,
+    reporter_contact TEXT NOT NULL DEFAULT '',
+    reason TEXT NOT NULL,
+    occurred_at TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT '접수',
+    clip_key TEXT,
+    clip_content_type TEXT,
+    created_at TEXT NOT NULL
+  )`,
   `CREATE TABLE IF NOT EXISTS app_settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL,
     updated_at TEXT NOT NULL
   )`,
   `CREATE INDEX IF NOT EXISTS idx_training_device ON training_samples(device_id, captured_at DESC)`,
+  `CREATE INDEX IF NOT EXISTS idx_stop_work_occurred ON stop_work_requests(occurred_at DESC)`,
+  `CREATE INDEX IF NOT EXISTS idx_stop_work_device ON stop_work_requests(device_id, occurred_at DESC)`,
   `CREATE INDEX IF NOT EXISTS idx_media_updated_at ON media(updated_at DESC)`,
   `CREATE INDEX IF NOT EXISTS idx_events_occurred_at ON events(occurred_at DESC)`,
   `CREATE INDEX IF NOT EXISTS idx_events_device_id ON events(device_id)`,
@@ -408,7 +423,7 @@ async function getEventRetentionSettings(env) {
     readSetting(env, "event_retention_days", "30"),
     readSetting(env, "event_auto_cleanup", "true"),
     env.DB.prepare("SELECT COUNT(*) AS count FROM events").first(),
-    env.DB.prepare("SELECT COALESCE(SUM(byte_length),0) AS bytes FROM media WHERE key LIKE 'events/%'").first(),
+    env.DB.prepare("SELECT COALESCE(SUM(byte_length),0) AS bytes FROM media WHERE key LIKE 'events/%' OR key LIKE 'stop-work/%'").first(),
   ]);
   return {
     days: Math.min(365, Math.max(1, Number(daysValue || 30))),
@@ -426,6 +441,8 @@ async function cleanupEventsOlderThan(env, days) {
   if (!deleted) return { deleted: 0, cutoff, days: safeDays };
   await env.DB.batch([
     env.DB.prepare("DELETE FROM media WHERE key IN (SELECT snapshot_key FROM events WHERE occurred_at < ? AND snapshot_key IS NOT NULL)").bind(cutoff),
+    env.DB.prepare("DELETE FROM media WHERE key IN (SELECT clip_key FROM stop_work_requests WHERE occurred_at < ? AND clip_key IS NOT NULL)").bind(cutoff),
+    env.DB.prepare("DELETE FROM stop_work_requests WHERE occurred_at < ?").bind(cutoff),
     env.DB.prepare("DELETE FROM events WHERE occurred_at < ?").bind(cutoff),
   ]);
   return { deleted, cutoff, days: safeDays };
@@ -435,7 +452,8 @@ async function deleteAllEvents(env) {
   const countRow = await env.DB.prepare("SELECT COUNT(*) AS count FROM events").first();
   const deleted = Number(countRow?.count || 0);
   await env.DB.batch([
-    env.DB.prepare("DELETE FROM media WHERE key LIKE 'events/%'"),
+    env.DB.prepare("DELETE FROM media WHERE key LIKE 'events/%' OR key LIKE 'stop-work/%'"),
+    env.DB.prepare("DELETE FROM stop_work_requests"),
     env.DB.prepare("DELETE FROM events"),
   ]);
   return { deleted };
@@ -460,6 +478,92 @@ function base64ToBytes(base64) {
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
   return bytes;
+}
+
+function stopWorkNotificationText(detail) {
+  return [
+    "[POSEIDON 작업중지권 발동]",
+    `장치: ${detail.deviceName || detail.deviceId}`,
+    `사업장/구역: ${detail.site || "-"} / ${detail.area || "-"}`,
+    `발동자: ${detail.reporterName}`,
+    `연락처: ${detail.reporterContact || "미입력"}`,
+    `사유: ${detail.reason}`,
+    `시간: ${detail.occurredAt}`,
+    detail.clipUrl ? `전후 영상: ${detail.origin}${detail.clipUrl}` : "전후 영상: 저장 없음",
+  ].join("\n");
+}
+
+async function sendStopWorkEmail(env, detail) {
+  if (!env.RESEND_API_KEY || !env.ADMIN_EMAIL || !env.EMAIL_FROM) return { channel: "email", configured: false };
+  const response = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${env.RESEND_API_KEY}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      from: env.EMAIL_FROM,
+      to: [env.ADMIN_EMAIL],
+      subject: `[POSEIDON] 작업중지권 발동 - ${detail.deviceName || detail.deviceId}`,
+      text: stopWorkNotificationText(detail),
+    }),
+  });
+  if (!response.ok) throw new Error(`email ${response.status}`);
+  return { channel: "email", configured: true, sent: true };
+}
+
+async function sendStopWorkSms(env, detail) {
+  if (!env.TWILIO_ACCOUNT_SID || !env.TWILIO_AUTH_TOKEN || !env.TWILIO_FROM_NUMBER || !env.ADMIN_PHONE) return { channel: "sms", configured: false };
+  const body = new URLSearchParams();
+  body.set("From", env.TWILIO_FROM_NUMBER);
+  body.set("To", env.ADMIN_PHONE);
+  body.set("Body", stopWorkNotificationText(detail).slice(0, 1400));
+  const auth = btoa(`${env.TWILIO_ACCOUNT_SID}:${env.TWILIO_AUTH_TOKEN}`);
+  const response = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${encodeURIComponent(env.TWILIO_ACCOUNT_SID)}/Messages.json`, {
+    method: "POST",
+    headers: {
+      authorization: `Basic ${auth}`,
+      "content-type": "application/x-www-form-urlencoded;charset=UTF-8",
+    },
+    body,
+  });
+  if (!response.ok) throw new Error(`sms ${response.status}`);
+  return { channel: "sms", configured: true, sent: true };
+}
+
+async function sendStopWorkWebhook(env, detail) {
+  if (!env.NOTIFY_WEBHOOK_URL) return { channel: "webhook", configured: false };
+  const response = await fetch(env.NOTIFY_WEBHOOK_URL, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      type: "POSEIDON_STOP_WORK_REQUEST",
+      severity: "critical",
+      ...detail,
+      text: stopWorkNotificationText(detail),
+    }),
+  });
+  if (!response.ok) throw new Error(`webhook ${response.status}`);
+  return { channel: "webhook", configured: true, sent: true };
+}
+
+async function sendStopWorkNotifications(env, detail) {
+  const jobs = [
+    ["email", () => sendStopWorkEmail(env, detail)],
+    ["sms", () => sendStopWorkSms(env, detail)],
+    ["webhook", () => sendStopWorkWebhook(env, detail)],
+  ];
+  const results = [];
+  for (const [channel, job] of jobs) {
+    try {
+      const result = await job();
+      results.push(result || { channel, configured: false });
+    } catch (error) {
+      console.warn(`stop-work ${channel} notification failed`, error?.message || error);
+      results.push({ channel, configured: true, sent: false });
+    }
+  }
+  return results;
 }
 
 /* ---------- API ---------- */
@@ -499,7 +603,7 @@ async function handleRealtime(request, env) {
   return env.SIGNALING.get(id).fetch(request);
 }
 
-async function handleApi(request, env) {
+async function handleApi(request, env, ctx) {
   const url = new URL(request.url);
   const path = url.pathname;
   const method = request.method.toUpperCase();
@@ -524,6 +628,94 @@ async function handleApi(request, env) {
     let extra = [];
     try { extra = env.TURN_ICE_SERVERS ? JSON.parse(env.TURN_ICE_SERVERS) : []; } catch { extra = []; }
     return json({ ok: true, data: { iceServers: [{ urls: ["stun:stun.cloudflare.com:3478"] }, ...(Array.isArray(extra) ? extra : [])] } });
+  }
+
+  if (path === "/api/stop-work" && method === "POST") {
+    const contentType = request.headers.get("content-type") || "";
+    if (!contentType.includes("multipart/form-data")) return error("작업중지권 요청은 multipart/form-data 형식이어야 합니다.");
+    const form = await request.formData();
+    const deviceId = String(form.get("deviceId") || "").trim();
+    const reporterName = String(form.get("reporterName") || "").trim().slice(0, 80);
+    const reporterContact = String(form.get("reporterContact") || "").trim().slice(0, 120);
+    const reason = String(form.get("reason") || "").trim().slice(0, 2000);
+    const occurredAt = String(form.get("occurredAt") || nowIso());
+    if (!deviceId) return error("deviceId가 필요합니다.");
+    if (!reporterName) return error("발동자 이름이 필요합니다.");
+    if (!reason) return error("작업중지 사유가 필요합니다.");
+
+    const device = await env.DB.prepare("SELECT id,name,site,area FROM devices WHERE id=?").bind(deviceId).first();
+    if (!device) return error("등록된 장치를 찾을 수 없습니다.", 404);
+
+    const requestId = randomId("stop");
+    const eventId = randomId("evt");
+    let snapshotKey = null;
+    let clipKey = null;
+    let clipContentType = "";
+
+    const snapshotBase64 = String(form.get("snapshotBase64") || "");
+    if (snapshotBase64) {
+      const bytes = base64ToBytes(snapshotBase64);
+      if (bytes.byteLength <= 1_200_000) snapshotKey = await putImage(env, `events/${deviceId}/${eventId}.jpg`, bytes, "image/jpeg");
+    }
+
+    const clip = form.get("clip");
+    if (clip && typeof clip.arrayBuffer === "function" && Number(clip.size || 0) > 0) {
+      if (Number(clip.size || 0) > 1_400_000) return error("작업중지 전후 영상은 1.4MB 이하여야 합니다.", 413);
+      clipContentType = String(clip.type || "video/webm");
+      const ext = clipContentType.includes("mp4") ? "mp4" : "webm";
+      clipKey = await putImage(env, `stop-work/${deviceId}/${requestId}.${ext}`, new Uint8Array(await clip.arrayBuffer()), clipContentType);
+    }
+
+    const clipUrl = clipKey ? `/media/${encodeURIComponent(clipKey)}` : null;
+    const metadata = {
+      stopWork: true,
+      stopWorkId: requestId,
+      reporterName,
+      reporterContact,
+      reason,
+      clipUrl,
+      clipKey,
+      beforeSeconds: 10,
+      afterSeconds: 10,
+    };
+    const message = `작업중지권 발동: ${reason}`;
+    const createdAt = nowIso();
+
+    await env.DB.batch([
+      env.DB.prepare(`INSERT INTO stop_work_requests (id,event_id,device_id,reporter_name,reporter_contact,reason,occurred_at,status,clip_key,clip_content_type,created_at) VALUES (?,?,?,?,?,?,?,'접수',?,?,?)`)
+        .bind(requestId, eventId, deviceId, reporterName, reporterContact, reason, occurredAt, clipKey, clipContentType, createdAt),
+      env.DB.prepare(`INSERT INTO events (id,device_id,type,category,severity,message,occurred_at,acknowledged,status,snapshot_key,metadata_json,created_at) VALUES (?,?,?,?,?,?,?,0,'즉시 확인',?,?,?)`)
+        .bind(eventId, deviceId, "STOP_WORK_REQUEST", "작업중지권", "critical", message, occurredAt, snapshotKey, JSON.stringify(metadata), createdAt),
+      env.DB.prepare("UPDATE devices SET current_risk='작업중지',last_seen=?,status='online',updated_at=? WHERE id=?")
+        .bind(createdAt, createdAt, deviceId),
+    ]);
+
+    const origin = new URL(request.url).origin;
+    const detail = {
+      requestId,
+      eventId,
+      deviceId,
+      deviceName: device.name,
+      site: device.site,
+      area: device.area,
+      reporterName,
+      reporterContact,
+      reason,
+      occurredAt,
+      clipUrl,
+      origin,
+    };
+    const notificationResults = await sendStopWorkNotifications(env, detail);
+    const labels = { email: "이메일", sms: "문자", webhook: "웹훅" };
+    const sentChannels = notificationResults.filter((item) => item.sent).map((item) => labels[item.channel] || item.channel);
+    const failedConfigured = notificationResults.some((item) => item.configured && item.sent === false);
+    const notificationSummary = sentChannels.length
+      ? `관리자 대시보드 접수 · ${sentChannels.join("·")} 전송 완료`
+      : failedConfigured
+        ? "관리자 대시보드 접수 · 외부 알림 전송 일부 실패"
+        : "관리자 대시보드 접수 · 외부 알림은 아직 미설정";
+
+    return json({ ok: true, data: { requestId, eventId, clipUrl, notificationSummary } }, 201);
   }
 
   const adminOnly = path.startsWith("/api/dashboard/") || path === "/api/devices" || path.startsWith("/api/events") || path.startsWith("/api/reports/") || path.startsWith("/api/admin/") || path.startsWith("/api/demo/") || (path.startsWith("/api/devices/") && method !== "GET") || path.match(/^\/api\/events\/[^/]+\/ack$/);
@@ -639,19 +831,28 @@ async function handleApi(request, env) {
   const deleteEventMatch = path.match(/^\/api\/events\/([^/]+)$/);
   if (deleteEventMatch && method === "DELETE") {
     const eventId = decodeURIComponent(deleteEventMatch[1]);
-    const row = await env.DB.prepare("SELECT snapshot_key FROM events WHERE id=?").bind(eventId).first();
+    const row = await env.DB.prepare("SELECT snapshot_key,metadata_json FROM events WHERE id=?").bind(eventId).first();
     if (!row) return error("이벤트를 찾을 수 없습니다.", 404);
+    const metadata = safeJsonParse(row.metadata_json, {});
     const statements = [env.DB.prepare("DELETE FROM events WHERE id=?").bind(eventId)];
     if (row.snapshot_key) statements.unshift(env.DB.prepare("DELETE FROM media WHERE key=?").bind(row.snapshot_key));
+    if (metadata.clipKey) statements.unshift(env.DB.prepare("DELETE FROM media WHERE key=?").bind(String(metadata.clipKey)));
+    if (metadata.stopWorkId) statements.push(env.DB.prepare("DELETE FROM stop_work_requests WHERE id=?").bind(String(metadata.stopWorkId)));
     await env.DB.batch(statements);
     return json({ ok: true });
   }
 
   const ackMatch = path.match(/^\/api\/events\/([^/]+)\/ack$/);
   if (ackMatch && method === "POST") {
+    const eventId = decodeURIComponent(ackMatch[1]);
     const body = await readJson(request).catch(() => ({}));
-    const result = await env.DB.prepare("UPDATE events SET acknowledged=1,status=? WHERE id=?").bind(String(body.status || "확인 완료"), decodeURIComponent(ackMatch[1])).run();
-    if (!result.meta?.changes) return error("이벤트를 찾을 수 없습니다.", 404);
+    const status = String(body.status || "확인 완료");
+    const row = await env.DB.prepare("SELECT metadata_json FROM events WHERE id=?").bind(eventId).first();
+    if (!row) return error("이벤트를 찾을 수 없습니다.", 404);
+    const metadata = safeJsonParse(row.metadata_json, {});
+    const statements = [env.DB.prepare("UPDATE events SET acknowledged=1,status=? WHERE id=?").bind(status, eventId)];
+    if (metadata.stopWorkId) statements.push(env.DB.prepare("UPDATE stop_work_requests SET status=? WHERE id=?").bind(status, String(metadata.stopWorkId)));
+    await env.DB.batch(statements);
     return json({ ok: true });
   }
 
@@ -659,8 +860,9 @@ async function handleApi(request, env) {
   if (deleteDeviceMatch && method === "DELETE") {
     const deviceId = decodeURIComponent(deleteDeviceMatch[1]);
     await env.DB.batch([
+      env.DB.prepare("DELETE FROM media WHERE key LIKE ? OR key LIKE ? OR key LIKE ?").bind(`previews/${deviceId}/%`, `events/${deviceId}/%`, `stop-work/${deviceId}/%`),
+      env.DB.prepare("DELETE FROM stop_work_requests WHERE device_id=?").bind(deviceId),
       env.DB.prepare("DELETE FROM events WHERE device_id=?").bind(deviceId),
-      env.DB.prepare("DELETE FROM media WHERE key LIKE ? OR key LIKE ?").bind(`previews/${deviceId}/%`, `events/${deviceId}/%`),
       env.DB.prepare("DELETE FROM devices WHERE id=?").bind(deviceId),
     ]);
     return json({ ok: true });
@@ -785,7 +987,7 @@ async function proxyModel(request, ctx, modelUrl, cachePath, filename, errorMess
   const cacheKey = new Request(new URL(cachePath, request.url), { method: "GET" });
   const cached = await cache.match(cacheKey);
   if (cached) return cached;
-  const upstream = await fetch(modelUrl, { redirect: "follow", headers: { "user-agent": "POSEIDON-AI-Safety/6.0" } });
+  const upstream = await fetch(modelUrl, { redirect: "follow", headers: { "user-agent": "POSEIDON-AI-Safety/6.2" } });
   if (!upstream.ok) return error(errorMessage, 502, `upstream ${upstream.status}`);
   const headers = new Headers(upstream.headers);
   headers.set("content-type", "application/octet-stream");
@@ -814,7 +1016,7 @@ export default {
     try {
       if (url.pathname === "/models/ppe.onnx") return await handlePpeModel(request, env, ctx);
       if (url.pathname === "/models/person.onnx") return await handlePersonModel(request, env, ctx);
-      if (url.pathname.startsWith("/api/")) return await handleApi(request, env);
+      if (url.pathname.startsWith("/api/")) return await handleApi(request, env, ctx);
       if (url.pathname.startsWith("/media/")) return await handleMedia(request, env);
       const assetResponse = await env.ASSETS.fetch(request);
       const headers = new Headers(assetResponse.headers);
