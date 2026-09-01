@@ -970,3 +970,68 @@ button, .top-action, .icon-button, .table-action { min-height: 42px; }
   .guard-side-stack { order: 3; }
 }
 .media-viewer-backdrop { z-index: 215; }
+
+/* V6.5 PowerPoint-style danger-zone editor */
+.danger-outline-button {
+  min-height: 43px;
+  border: 1px solid rgba(255, 75, 96, .48);
+  border-radius: 12px;
+  padding: 0 16px;
+  color: #ff9eaa;
+  background: rgba(94, 10, 28, .20);
+  font-weight: 800;
+}
+.danger-outline-button:hover { background: rgba(126, 15, 35, .34); color: #fff; }
+#zoneCanvas { touch-action: none; user-select: none; -webkit-user-select: none; }
+.admin-zone-mode-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.admin-zone-stage { position: relative; }
+.admin-zone-hint {
+  left: 50%;
+  bottom: 52px;
+  z-index: 3;
+}
+.admin-zone-help { margin: 0; }
+.keyboard-tip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.keyboard-tip kbd {
+  display: inline-flex;
+  min-height: 28px;
+  align-items: center;
+  padding: 0 9px;
+  border: 1px solid var(--line-strong);
+  border-bottom-width: 3px;
+  border-radius: 7px;
+  color: var(--text);
+  background: rgba(255,255,255,.04);
+  font: 700 11px/1 ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+.guard-zone-editor-actions .danger-outline-button { min-height: 44px; }
+
+@media (max-width: 960px) {
+  .zone-config-layout { grid-template-columns: 1fr; }
+  .zone-config-layout .config-sidebar { grid-template-columns: repeat(2, minmax(0,1fr)); }
+  .zone-config-layout .config-sidebar > * { min-width: 0; }
+  .zone-config-layout .admin-zone-mode-row,
+  .zone-config-layout .admin-zone-help,
+  .zone-config-layout .keyboard-tip,
+  .zone-config-layout .switch-row { grid-column: 1 / -1; }
+}
+
+@media (max-width: 640px) {
+  .zone-config-layout .config-sidebar { grid-template-columns: 1fr; padding: 14px; gap: 12px; }
+  .zone-config-layout .config-sidebar > * { grid-column: auto; }
+  .admin-zone-mode-row { grid-template-columns: 1fr 1fr; }
+  .admin-zone-hint { bottom: 48px; max-width: calc(100% - 18px); font-size: 10px; }
+  .toolbar-actions .danger-outline-button { width: 100%; }
+}
+.guard-zone-editor-actions #guardZoneDelete { grid-column: 1 / -1; }
+@media (max-width: 640px) { .guard-zone-editor-actions #guardZoneDelete { grid-column: auto; } }

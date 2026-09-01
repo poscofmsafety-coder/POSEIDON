@@ -1,4 +1,4 @@
-const POSEIDON_BUILD = "6.3.0";
+const POSEIDON_BUILD = "6.5.0";
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -220,6 +220,16 @@ const guardZoneEditor = {
   suppressAdd: false,
   loopTimer: null,
   view: { x: 0, y: 0, width: 1280, height: 720 },
+};
+
+const adminZoneEditor = {
+  mode: "polygon",
+  drag: null,
+  pointerStart: null,
+  suppressAdd: false,
+  view: { x: 0, y: 0, width: 1280, height: 720 },
+  backgroundImage: null,
+  backgroundUrl: null,
 };
 
 function escapeHtml(value) {
@@ -2768,10 +2778,10 @@ function updateGuardZoneModeUi() {
   $$('[data-guard-zone-mode]').forEach((button) => button.classList.toggle("active", button.dataset.guardZoneMode === guardZoneEditor.mode));
   const rectangle = guardZoneEditor.mode === "rectangle";
   if ($("#guardZoneEditorHint")) $("#guardZoneEditorHint").textContent = rectangle
-    ? "사각형 모드 · 안쪽을 끌면 이동, 네 모서리를 끌면 크기가 조절됩니다."
+    ? "사각형 모드 · 안쪽 드래그=이동 · 8개 손잡이=크기조절 · X/Delete=삭제"
     : "다각형 모드 · 화면을 3곳 이상 터치하세요. 빨간 점도 끌어서 조정할 수 있습니다.";
   if ($("#guardZoneHelp")) $("#guardZoneHelp").innerHTML = rectangle
-    ? "<b>사각형 사용법</b><span>사각형 안쪽을 마우스·손가락으로 끌어 이동하고, 네 모서리의 원을 끌어 크기를 조절하세요.</span>"
+    ? "<b>PPT처럼 편집</b><span>사각형 안쪽을 끌어 이동하고 8개 흰색 손잡이로 크기를 조절합니다. 빨간 X 또는 Delete 키로 삭제한 뒤 저장하세요.</span>"
     : "<b>다각형 사용법</b><span>카메라 화면을 3곳 이상 터치하면 선이 연결됩니다. 빨간 점은 다시 끌어서 위치를 조정할 수 있습니다.</span>";
   if ($("#guardZoneUndo")) $("#guardZoneUndo").disabled = rectangle || !guardZoneEditor.points.length;
 }
@@ -2838,23 +2848,7 @@ function drawGuardZoneEditor() {
   ctx.strokeStyle = guardZoneEditor.enabled ? "#ff355e" : "#ff9d57";
   ctx.lineWidth = 5;
   ctx.stroke();
-  const rect = canvas.getBoundingClientRect();
-  const scale = rect.width ? canvas.width / rect.width : 1;
-  const radius = Math.max(10, 13 * scale);
-  points.forEach(([x, y], index) => {
-    ctx.beginPath();
-    ctx.arc(px(x), py(y), radius, 0, Math.PI * 2);
-    ctx.fillStyle = "#fff";
-    ctx.fill();
-    ctx.lineWidth = Math.max(3, 3 * scale);
-    ctx.strokeStyle = "#ff355e";
-    ctx.stroke();
-    ctx.fillStyle = "#07131d";
-    ctx.font = `${Math.max(12, 11 * scale)}px sans-serif`;
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText(String(index + 1), px(x), py(y) + 1);
-  });
+  drawZoneSelectionControls(ctx, canvas, points, guardZoneEditor.mode, view);
 }
 
 function guardZonePointerPosition(event) {
@@ -2872,42 +2866,157 @@ function guardZonePointerPosition(event) {
     rect,
     view,
     inside,
+    canvasX,
+    canvasY,
+    canvasWidth: canvas.width,
+    canvasHeight: canvas.height,
   };
 }
 
-function guardZoneHitVertex(position) {
-  const contentCssWidth = position.rect.width * (position.view.width / 1280);
-  const contentCssHeight = position.rect.height * (position.view.height / 720);
-  const radiusX = 26 / Math.max(220, contentCssWidth);
-  const radiusY = 26 / Math.max(140, contentCssHeight);
+function zoneBounds(points = []) {
+  if (!points.length) return null;
+  const xs = points.map(([x]) => x);
+  const ys = points.map(([, y]) => y);
+  return { left: Math.min(...xs), right: Math.max(...xs), top: Math.min(...ys), bottom: Math.max(...ys) };
+}
+
+function rectangleHandlePoints(points = []) {
+  const b = zoneBounds(points);
+  if (!b) return [];
+  const cx = (b.left + b.right) / 2;
+  const cy = (b.top + b.bottom) / 2;
+  return [
+    ["nw", b.left, b.top], ["n", cx, b.top], ["ne", b.right, b.top],
+    ["e", b.right, cy], ["se", b.right, b.bottom], ["s", cx, b.bottom],
+    ["sw", b.left, b.bottom], ["w", b.left, cy],
+  ];
+}
+
+function zoneDeleteControl(points = []) {
+  const b = zoneBounds(points);
+  if (!b) return null;
+  const placeRight = b.right <= 0.92;
+  const placeAbove = b.top >= 0.10;
+  return {
+    x: clamp01(placeRight ? b.right + 0.038 : b.right - 0.038),
+    y: clamp01(placeAbove ? b.top - 0.060 : b.top + 0.060),
+  };
+}
+
+function hitNormalizedPoint(position, point, radiusCss = 24) {
+  if (!point) return false;
+  const contentCssWidth = position.rect.width * (position.view.width / Math.max(1, position.canvasWidth));
+  const contentCssHeight = position.rect.height * (position.view.height / Math.max(1, position.canvasHeight));
+  const radiusX = radiusCss / Math.max(180, contentCssWidth);
+  const radiusY = radiusCss / Math.max(120, contentCssHeight);
+  return (((position.x - point[0]) / radiusX) ** 2 + ((position.y - point[1]) / radiusY) ** 2) <= 1;
+}
+
+function hitZoneHandle(position, points, mode) {
+  if (mode === "rectangle" && points.length === 4) {
+    for (const [name, x, y] of rectangleHandlePoints(points)) {
+      if (hitNormalizedPoint(position, [x, y], 25)) return name;
+    }
+    return null;
+  }
   let best = -1;
-  let bestScore = Infinity;
-  guardZoneEditor.points.forEach(([x, y], index) => {
-    const score = ((position.x - x) / radiusX) ** 2 + ((position.y - y) / radiusY) ** 2;
-    if (score <= 1 && score < bestScore) { best = index; bestScore = score; }
+  let bestDistance = Infinity;
+  points.forEach(([x, y], index) => {
+    const distance = Math.hypot(position.x - x, position.y - y);
+    if (hitNormalizedPoint(position, [x, y], 25) && distance < bestDistance) {
+      best = index;
+      bestDistance = distance;
+    }
   });
-  return best;
+  return best >= 0 ? best : null;
 }
 
-function resizeGuardRectangle(index, position) {
-  const points = guardZoneEditor.points;
-  if (points.length !== 4) return;
-  const opposite = points[(index + 2) % 4];
+function resizeRectangleByHandle(points, handle, position) {
+  const b = zoneBounds(points);
+  if (!b) return points;
   const minSize = 0.05;
-  let x = position.x, y = position.y;
-  if (index === 0) { x = Math.min(x, opposite[0] - minSize); y = Math.min(y, opposite[1] - minSize); guardZoneEditor.points = [[x,y],[opposite[0],y],[opposite[0],opposite[1]],[x,opposite[1]]]; }
-  if (index === 1) { x = Math.max(x, opposite[0] + minSize); y = Math.min(y, opposite[1] - minSize); guardZoneEditor.points = [[opposite[0],y],[x,y],[x,opposite[1]],[opposite[0],opposite[1]]]; }
-  if (index === 2) { x = Math.max(x, opposite[0] + minSize); y = Math.max(y, opposite[1] + minSize); guardZoneEditor.points = [[opposite[0],opposite[1]],[x,opposite[1]],[x,y],[opposite[0],y]]; }
-  if (index === 3) { x = Math.min(x, opposite[0] - minSize); y = Math.max(y, opposite[1] + minSize); guardZoneEditor.points = [[x,opposite[1]],[opposite[0],opposite[1]],[opposite[0],y],[x,y]]; }
-  guardZoneEditor.points = guardZoneEditor.points.map(([px, py]) => [clamp01(px), clamp01(py)]);
+  let { left, right, top, bottom } = b;
+  if (handle.includes("w")) left = Math.min(clamp01(position.x), right - minSize);
+  if (handle.includes("e")) right = Math.max(clamp01(position.x), left + minSize);
+  if (handle.includes("n")) top = Math.min(clamp01(position.y), bottom - minSize);
+  if (handle.includes("s")) bottom = Math.max(clamp01(position.y), top + minSize);
+  return [[left, top], [right, top], [right, bottom], [left, bottom]].map(([x, y]) => [clamp01(x), clamp01(y)]);
 }
 
-function moveGuardZone(deltaX, deltaY, originPoints) {
-  if (!originPoints.length) return;
+function moveZonePoints(deltaX, deltaY, originPoints) {
+  if (!originPoints.length) return originPoints;
   const xs = originPoints.map(([x]) => x), ys = originPoints.map(([, y]) => y);
   const dx = Math.max(-Math.min(...xs), Math.min(1 - Math.max(...xs), deltaX));
   const dy = Math.max(-Math.min(...ys), Math.min(1 - Math.max(...ys), deltaY));
-  guardZoneEditor.points = originPoints.map(([x, y]) => [x + dx, y + dy]);
+  return originPoints.map(([x, y]) => [x + dx, y + dy]);
+}
+
+function drawZoneSelectionControls(ctx, canvas, points, mode, view = { x: 0, y: 0, width: canvas.width, height: canvas.height }) {
+  if (!points.length) return;
+  const px = (x) => view.x + x * view.width;
+  const py = (y) => view.y + y * view.height;
+  const cssRect = canvas.getBoundingClientRect();
+  const scale = cssRect.width ? canvas.width / cssRect.width : 1;
+  const handleSize = Math.max(12, 12 * scale);
+
+  if (mode === "rectangle" && points.length === 4) {
+    for (const [, x, y] of rectangleHandlePoints(points)) {
+      ctx.fillStyle = "#ffffff";
+      ctx.strokeStyle = "#ff355e";
+      ctx.lineWidth = Math.max(2, 2.5 * scale);
+      ctx.fillRect(px(x) - handleSize / 2, py(y) - handleSize / 2, handleSize, handleSize);
+      ctx.strokeRect(px(x) - handleSize / 2, py(y) - handleSize / 2, handleSize, handleSize);
+    }
+  } else {
+    const radius = Math.max(9, 10 * scale);
+    points.forEach(([x, y]) => {
+      ctx.beginPath();
+      ctx.arc(px(x), py(y), radius, 0, Math.PI * 2);
+      ctx.fillStyle = "#fff";
+      ctx.fill();
+      ctx.lineWidth = Math.max(2, 2.5 * scale);
+      ctx.strokeStyle = "#ff355e";
+      ctx.stroke();
+    });
+  }
+
+  const del = zoneDeleteControl(points);
+  if (del) {
+    const r = Math.max(15, 16 * scale);
+    const dx = px(del.x), dy = py(del.y);
+    ctx.beginPath();
+    ctx.arc(dx, dy, r, 0, Math.PI * 2);
+    ctx.fillStyle = "#ef233c";
+    ctx.fill();
+    ctx.lineWidth = Math.max(2, 2 * scale);
+    ctx.strokeStyle = "rgba(255,255,255,.9)";
+    ctx.stroke();
+    ctx.strokeStyle = "#fff";
+    ctx.lineWidth = Math.max(3, 3 * scale);
+    ctx.lineCap = "round";
+    const k = r * 0.40;
+    ctx.beginPath();
+    ctx.moveTo(dx - k, dy - k); ctx.lineTo(dx + k, dy + k);
+    ctx.moveTo(dx + k, dy - k); ctx.lineTo(dx - k, dy + k);
+    ctx.stroke();
+  }
+}
+
+function guardZoneHitDelete(position) {
+  const del = zoneDeleteControl(guardZoneEditor.points);
+  return del && hitNormalizedPoint(position, [del.x, del.y], 30);
+}
+
+function deleteGuardZoneEditor() {
+  if (!guardZoneEditor.points.length) return;
+  guardZoneEditor.points = [];
+  guardZoneEditor.enabled = false;
+  guardZoneEditor.dirty = true;
+  if ($("#guardZoneEditorEnabled")) $("#guardZoneEditorEnabled").checked = false;
+  if ($("#guardZoneEnabled")) $("#guardZoneEnabled").checked = false;
+  updateGuardZoneModeUi();
+  drawGuardZoneEditor();
+  toast("위험구역을 삭제했습니다. '위험구역 저장'을 눌러 적용해주세요.", 4200);
 }
 
 function onGuardZonePointerDown(event) {
@@ -2917,11 +3026,17 @@ function onGuardZonePointerDown(event) {
   try { canvas.setPointerCapture(event.pointerId); } catch { /* noop */ }
   const position = guardZonePointerPosition(event);
   if (!position.inside) { guardZoneEditor.pointerStart = null; guardZoneEditor.drag = null; return; }
-  const vertex = guardZoneHitVertex(position);
+  if (guardZoneHitDelete(position)) {
+    guardZoneEditor.pointerStart = null;
+    guardZoneEditor.drag = null;
+    deleteGuardZoneEditor();
+    return;
+  }
+  const handle = hitZoneHandle(position, guardZoneEditor.points, guardZoneEditor.mode);
   guardZoneEditor.pointerStart = { x: position.x, y: position.y };
   guardZoneEditor.suppressAdd = false;
-  if (vertex >= 0) {
-    guardZoneEditor.drag = { type: "vertex", index: vertex, originPoints: guardZoneEditor.points.map((point) => [...point]) };
+  if (handle !== null) {
+    guardZoneEditor.drag = { type: "handle", handle, originPoints: guardZoneEditor.points.map((point) => [...point]) };
   } else if (guardZoneEditor.mode === "rectangle" && guardZoneEditor.points.length >= 3 && pointInPolygon([position.x, position.y], guardZoneEditor.points)) {
     guardZoneEditor.drag = { type: "move", startX: position.x, startY: position.y, originPoints: guardZoneEditor.points.map((point) => [...point]) };
   } else {
@@ -2937,10 +3052,10 @@ function onGuardZonePointerMove(event) {
   if (!guardZoneEditor.drag) return;
   event.preventDefault();
   guardZoneEditor.dirty = true;
-  if (guardZoneEditor.drag.type === "move") moveGuardZone(position.x - guardZoneEditor.drag.startX, position.y - guardZoneEditor.drag.startY, guardZoneEditor.drag.originPoints);
-  else if (guardZoneEditor.drag.type === "vertex") {
-    if (guardZoneEditor.mode === "rectangle") resizeGuardRectangle(guardZoneEditor.drag.index, position);
-    else guardZoneEditor.points[guardZoneEditor.drag.index] = [position.x, position.y];
+  if (guardZoneEditor.drag.type === "move") guardZoneEditor.points = moveZonePoints(position.x - guardZoneEditor.drag.startX, position.y - guardZoneEditor.drag.startY, guardZoneEditor.drag.originPoints);
+  else if (guardZoneEditor.drag.type === "handle") {
+    if (guardZoneEditor.mode === "rectangle") guardZoneEditor.points = resizeRectangleByHandle(guardZoneEditor.points, guardZoneEditor.drag.handle, position);
+    else if (Number.isInteger(guardZoneEditor.drag.handle)) guardZoneEditor.points[guardZoneEditor.drag.handle] = [position.x, position.y];
   }
   drawGuardZoneEditor();
 }
@@ -3047,6 +3162,26 @@ async function prepareZoneEditor() {
   await loadSelectedZone();
 }
 
+function updateAdminZoneModeUi() {
+  $$('[data-admin-zone-mode]').forEach((button) => button.classList.toggle("active", button.dataset.adminZoneMode === adminZoneEditor.mode));
+  const rectangle = adminZoneEditor.mode === "rectangle";
+  if ($("#adminZoneHint")) $("#adminZoneHint").textContent = rectangle
+    ? "사각형 · 내부 드래그=이동 · 8개 손잡이=크기조절 · X/Delete=삭제"
+    : "다각형 · 빈 곳을 클릭해 점 추가 · 점 드래그=조절 · X/Delete=삭제";
+  if ($("#adminZoneHelp")) $("#adminZoneHelp").innerHTML = rectangle
+    ? "<b>PPT 사각형 방식</b><span>사각형 안쪽을 마우스·손가락으로 끌어 이동하고 8개 흰색 손잡이로 크기를 조절하세요. 빨간 X나 Delete 키로 삭제할 수 있습니다.</span>"
+    : "<b>다각형 방식</b><span>화면을 3곳 이상 클릭해 구역을 만들고 각 점을 드래그해 조정합니다. 빨간 X나 Delete 키로 전체 구역을 삭제할 수 있습니다.</span>";
+}
+
+function setAdminZoneMode(mode) {
+  if (!["polygon", "rectangle"].includes(mode)) return;
+  adminZoneEditor.mode = mode;
+  if (mode === "rectangle" && !isAxisAlignedRectangle(state.zonePoints)) state.zonePoints = defaultGuardRectangle();
+  if (mode === "polygon" && isAxisAlignedRectangle(state.zonePoints)) state.zonePoints = [];
+  updateAdminZoneModeUi();
+  drawZoneCanvas();
+}
+
 async function loadSelectedZone() {
   const deviceId = $("#zoneDeviceSelect").value;
   if (!deviceId) return;
@@ -3054,18 +3189,40 @@ async function loadSelectedZone() {
     const config = await api(`/api/devices/${encodeURIComponent(deviceId)}/config`);
     state.zoneConfig = config;
     const zone = config.zones?.[0] || defaultConfig().zones[0];
-    state.zonePoints = [...(Array.isArray(zone.points) ? zone.points : []).map(([x, y]) => [x, y])];
+    state.zonePoints = [...(Array.isArray(zone.points) ? zone.points : []).map(([x, y]) => [clamp01(x), clamp01(y)])];
+    adminZoneEditor.mode = zone.shape === "rectangle" || isAxisAlignedRectangle(state.zonePoints) ? "rectangle" : "polygon";
     $("#zoneName").value = zone.name || "출입 제한 구역";
     $("#zoneSeverity").value = zone.severity || "high";
     $("#zoneEnabledAdmin").checked = zone.enabled !== false && config.rules?.dangerZone !== false;
     const device = state.devices.find((item) => item.id === deviceId);
     state.zoneBackground = device?.previewUrl || null;
+    loadAdminZoneBackground(state.zoneBackground);
+    updateAdminZoneModeUi();
     drawZoneCanvas();
   } catch (error) { toast(error.message); }
 }
 
 function getLiveVideoForDevice(deviceId) {
   return $$(`.device-card[data-device-id="${CSS.escape(deviceId)}"] .device-video`).find((video) => !video.hidden && video.readyState >= 2) || null;
+}
+
+function loadAdminZoneBackground(url) {
+  if (!url) {
+    adminZoneEditor.backgroundImage = null;
+    adminZoneEditor.backgroundUrl = null;
+    drawZoneCanvas();
+    return;
+  }
+  if (adminZoneEditor.backgroundUrl === url && adminZoneEditor.backgroundImage?.complete) return;
+  adminZoneEditor.backgroundUrl = url;
+  const image = new Image();
+  image.onload = () => {
+    if (adminZoneEditor.backgroundUrl !== url) return;
+    adminZoneEditor.backgroundImage = image;
+    drawZoneCanvas();
+  };
+  image.onerror = () => { if (adminZoneEditor.backgroundUrl === url) adminZoneEditor.backgroundImage = null; };
+  image.src = `${url}${url.includes("?") ? "&" : "?"}zone=${Date.now()}`;
 }
 
 function drawZoneCanvas() {
@@ -3078,10 +3235,13 @@ function drawZoneCanvas() {
   const liveVideo = deviceId ? getLiveVideoForDevice(deviceId) : null;
   if (liveVideo) {
     ctx.drawImage(liveVideo, 0, 0, canvas.width, canvas.height);
-  } else if (state.zoneBackground) {
-    const image = new Image();
-    image.onload = () => { ctx.drawImage(image, 0, 0, canvas.width, canvas.height); drawZonePolygon(ctx, canvas); };
-    image.src = `${state.zoneBackground}?zone=${Date.now()}`;
+  } else if (adminZoneEditor.backgroundImage?.complete) {
+    ctx.drawImage(adminZoneEditor.backgroundImage, 0, 0, canvas.width, canvas.height);
+  } else {
+    ctx.fillStyle = "rgba(145,169,178,.86)";
+    ctx.font = "600 22px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("현장 프리뷰를 불러오는 중입니다.", canvas.width / 2, canvas.height / 2);
   }
   drawZonePolygon(ctx, canvas);
 }
@@ -3091,14 +3251,85 @@ function drawZonePolygon(ctx, canvas) {
   ctx.beginPath();
   state.zonePoints.forEach(([x, y], index) => index ? ctx.lineTo(x * canvas.width, y * canvas.height) : ctx.moveTo(x * canvas.width, y * canvas.height));
   if (state.zonePoints.length >= 3) ctx.closePath();
-  ctx.fillStyle = "rgba(255,55,82,.14)";
+  ctx.fillStyle = "rgba(255,55,82,.16)";
   if (state.zonePoints.length >= 3) ctx.fill();
-  ctx.strokeStyle = "#ff3c58";
-  ctx.lineWidth = 4;
+  ctx.strokeStyle = "#ff355e";
+  ctx.lineWidth = 5;
   ctx.stroke();
-  for (const [x, y] of state.zonePoints) {
-    ctx.beginPath(); ctx.arc(x * canvas.width, y * canvas.height, 8, 0, Math.PI * 2); ctx.fillStyle = "#ff3c58"; ctx.fill();
+  drawZoneSelectionControls(ctx, canvas, state.zonePoints, adminZoneEditor.mode, { x: 0, y: 0, width: canvas.width, height: canvas.height });
+}
+
+function adminZonePointerPosition(event) {
+  const canvas = $("#zoneCanvas");
+  const rect = canvas.getBoundingClientRect();
+  const canvasX = (event.clientX - rect.left) * canvas.width / Math.max(1, rect.width);
+  const canvasY = (event.clientY - rect.top) * canvas.height / Math.max(1, rect.height);
+  return {
+    x: clamp01(canvasX / canvas.width), y: clamp01(canvasY / canvas.height), rect,
+    view: { x: 0, y: 0, width: canvas.width, height: canvas.height },
+    inside: canvasX >= 0 && canvasY >= 0 && canvasX <= canvas.width && canvasY <= canvas.height,
+    canvasX, canvasY, canvasWidth: canvas.width, canvasHeight: canvas.height,
+  };
+}
+
+function adminZoneHitDelete(position) {
+  const del = zoneDeleteControl(state.zonePoints);
+  return del && hitNormalizedPoint(position, [del.x, del.y], 30);
+}
+
+function deleteAdminZone() {
+  if (!state.zonePoints.length) return;
+  state.zonePoints = [];
+  $("#zoneEnabledAdmin").checked = false;
+  adminZoneEditor.drag = null;
+  drawZoneCanvas();
+  toast("위험구역을 삭제했습니다. '설정 저장'을 눌러 현장에 적용해주세요.", 4200);
+}
+
+function onAdminZonePointerDown(event) {
+  const canvas = $("#zoneCanvas");
+  if (!canvas) return;
+  event.preventDefault();
+  try { canvas.setPointerCapture(event.pointerId); } catch { /* noop */ }
+  const position = adminZonePointerPosition(event);
+  if (!position.inside) return;
+  if (adminZoneHitDelete(position)) { deleteAdminZone(); return; }
+  const handle = hitZoneHandle(position, state.zonePoints, adminZoneEditor.mode);
+  adminZoneEditor.pointerStart = { x: position.x, y: position.y };
+  adminZoneEditor.suppressAdd = false;
+  if (handle !== null) {
+    adminZoneEditor.drag = { type: "handle", handle, originPoints: state.zonePoints.map((point) => [...point]) };
+  } else if (adminZoneEditor.mode === "rectangle" && state.zonePoints.length >= 3 && pointInPolygon([position.x, position.y], state.zonePoints)) {
+    adminZoneEditor.drag = { type: "move", startX: position.x, startY: position.y, originPoints: state.zonePoints.map((point) => [...point]) };
+  } else {
+    adminZoneEditor.drag = null;
   }
+}
+
+function onAdminZonePointerMove(event) {
+  if (!adminZoneEditor.pointerStart) return;
+  const position = adminZonePointerPosition(event);
+  const moved = Math.hypot(position.x - adminZoneEditor.pointerStart.x, position.y - adminZoneEditor.pointerStart.y);
+  if (moved > 0.008) adminZoneEditor.suppressAdd = true;
+  if (!adminZoneEditor.drag) return;
+  event.preventDefault();
+  if (adminZoneEditor.drag.type === "move") {
+    state.zonePoints = moveZonePoints(position.x - adminZoneEditor.drag.startX, position.y - adminZoneEditor.drag.startY, adminZoneEditor.drag.originPoints);
+  } else if (adminZoneEditor.drag.type === "handle") {
+    if (adminZoneEditor.mode === "rectangle") state.zonePoints = resizeRectangleByHandle(state.zonePoints, adminZoneEditor.drag.handle, position);
+    else if (Number.isInteger(adminZoneEditor.drag.handle)) state.zonePoints[adminZoneEditor.drag.handle] = [position.x, position.y];
+  }
+  drawZoneCanvas();
+}
+
+function onAdminZonePointerUp(event) {
+  if (!adminZoneEditor.pointerStart) return;
+  const position = adminZonePointerPosition(event);
+  if (adminZoneEditor.mode === "polygon" && !adminZoneEditor.drag && !adminZoneEditor.suppressAdd && position.inside) state.zonePoints.push([position.x, position.y]);
+  adminZoneEditor.drag = null;
+  adminZoneEditor.pointerStart = null;
+  adminZoneEditor.suppressAdd = false;
+  drawZoneCanvas();
 }
 
 async function saveZone() {
@@ -3113,7 +3344,8 @@ async function saveZone() {
     name: $("#zoneName").value.trim() || "출입 제한 구역",
     severity: $("#zoneSeverity").value,
     enabled,
-    points: state.zonePoints,
+    shape: adminZoneEditor.mode,
+    points: state.zonePoints.map(([x, y]) => [Number(clamp01(x).toFixed(5)), Number(clamp01(y).toFixed(5))]),
   }];
   state.zoneConfig = config;
   await api(`/api/devices/${encodeURIComponent(deviceId)}/config`, { method: "PUT", body: JSON.stringify({ config }) });
@@ -3121,7 +3353,7 @@ async function saveZone() {
 }
 
 function clearZone() {
-  state.zonePoints = [];
+  state.zonePoints = adminZoneEditor.mode === "rectangle" ? defaultGuardRectangle() : [];
   drawZoneCanvas();
 }
 
@@ -3247,6 +3479,7 @@ function bindEvents() {
   });
   $("#guardZoneUndo")?.addEventListener("click", undoGuardZonePoint);
   $("#guardZoneReset")?.addEventListener("click", resetGuardZoneEditor);
+  $("#guardZoneDelete")?.addEventListener("click", deleteGuardZoneEditor);
   $("#guardZoneSave")?.addEventListener("click", saveGuardZoneFromUser);
   $("#guardZoneName")?.addEventListener("input", () => { guardZoneEditor.dirty = true; });
   $("#guardZoneSeverity")?.addEventListener("change", () => { guardZoneEditor.dirty = true; });
@@ -3308,17 +3541,34 @@ function bindEvents() {
   $("#printReport").addEventListener("click", () => print());
 
   $("#zoneDeviceSelect").addEventListener("change", loadSelectedZone);
-  $("#zoneCanvas").addEventListener("click", (event) => {
-    const rect = event.currentTarget.getBoundingClientRect();
-    state.zonePoints.push([(event.clientX - rect.left) / rect.width, (event.clientY - rect.top) / rect.height]);
-    drawZoneCanvas();
-  });
+  $$('[data-admin-zone-mode]').forEach((button) => button.addEventListener("click", () => setAdminZoneMode(button.dataset.adminZoneMode)));
+  const adminZoneCanvas = $("#zoneCanvas");
+  adminZoneCanvas.addEventListener("pointerdown", onAdminZonePointerDown, { passive: false });
+  adminZoneCanvas.addEventListener("pointermove", onAdminZonePointerMove, { passive: false });
+  adminZoneCanvas.addEventListener("pointerup", onAdminZonePointerUp, { passive: false });
+  adminZoneCanvas.addEventListener("pointercancel", () => { adminZoneEditor.drag = null; adminZoneEditor.pointerStart = null; });
   $("#clearZone").addEventListener("click", clearZone);
+  $("#deleteZone")?.addEventListener("click", deleteAdminZone);
   $("#saveZone").addEventListener("click", saveZone);
 
   $$(".rule-device-select").forEach((select) => select.addEventListener("change", () => loadRuleEditor(select.closest(".page").id.replace("page-", ""))));
   $$(".rule-save").forEach((button) => button.addEventListener("click", () => saveCurrentRuleGroup(button)));
   $$(".speak-sample").forEach((button) => button.addEventListener("click", () => { unlockAudio(); speak(button.dataset.text); }));
+
+  document.addEventListener("keydown", (event) => {
+    if (!["Delete", "Backspace"].includes(event.key)) return;
+    const target = event.target;
+    if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement || target?.isContentEditable) return;
+    if (state.session?.role === "admin" && state.currentPage === "zones" && state.zonePoints.length) {
+      event.preventDefault();
+      deleteAdminZone();
+      return;
+    }
+    if (state.session?.role === "user" && state.currentPage === "guard" && guardZoneEditor.points.length) {
+      event.preventDefault();
+      deleteGuardZoneEditor();
+    }
+  });
 
   addEventListener("beforeunload", () => {
     if (guard.autoTraining.active) stopAutoTraining("페이지 종료");
