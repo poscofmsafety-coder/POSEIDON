@@ -1,6 +1,8 @@
 ADMIN_PIN=2468
 USER_PIN=1357
 SESSION_SECRET=replace-with-a-long-random-secret
+# Optional but recommended for company networks / mobile carriers.
+# Example JSON: [{"urls":"turn:turn.example.com:3478","username":"user","credential":"pass"}]
 TURN_ICE_SERVERS=[]
 
 # Optional: override YOLO11n person detection ONNX source

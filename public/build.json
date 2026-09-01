@@ -1,6 +1,6 @@
 {
   "project": "POSEIDON",
-  "version": "6.0.0",
+  "version": "6.1.0",
   "theme": "mythology-command",
   "cloudflare": "workers+d1+durable-objects",
   "durableObjects": "exports-sqlite",
@@ -11,5 +11,10 @@
   "mobileInference": "rgba-fallback+camera-permission-fallback",
   "eventRetention": "daily-cron+manual-delete+30d-default",
   "colabTraining": "T4-ready",
-  "kaggleTraining": "dataset-download-pipeline"
+  "kaggleTraining": "dataset-download-pipeline",
+  "overlay": "face-head-roi-only",
+  "loginLayout": "true-center",
+  "radio": "preflight+timeout+autoplay-recovery+turn-ready",
+  "voiceAlerts": "per-detection-item",
+  "heroReadability": "no-break-poseidon-risk-phrase"
 }

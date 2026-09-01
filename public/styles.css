@@ -458,7 +458,7 @@ body::before {
     linear-gradient(90deg,rgba(1,8,18,.96) 0%,rgba(1,9,20,.84) 48%,rgba(2,14,28,.72) 100%),
     url('/poseidon-concept.png') center/cover no-repeat;
 }
-.login-card { margin-left:min(34vw,440px); border-color:rgba(69,239,255,.38); background:linear-gradient(155deg,rgba(3,14,27,.95),rgba(5,28,48,.9)); box-shadow:0 35px 120px rgba(0,0,0,.58),0 0 70px rgba(15,151,225,.12); }
+.login-card { margin-left:0; border-color:rgba(69,239,255,.38); background:linear-gradient(155deg,rgba(3,14,27,.95),rgba(5,28,48,.9)); box-shadow:0 35px 120px rgba(0,0,0,.58),0 0 70px rgba(15,151,225,.12); }
 .poseidon-oath { display:flex; align-items:center; gap:12px; margin:0 0 24px; padding:13px 14px; border:1px solid rgba(231,189,91,.26); border-radius:13px; background:rgba(231,189,91,.055); }
 .poseidon-oath > span { color:var(--poseidon-gold); font-size:24px; }
 .poseidon-oath b,.poseidon-oath small { display:block; }
@@ -541,4 +541,33 @@ body::before {
   .guard-camera-stage canvas { object-fit:contain; }
   .guard-metrics { grid-template-columns:repeat(2,minmax(0,1fr)); }
   #guardFpsMetric { font-size:10px; }
+}
+
+
+/* POSEIDON v6.1 readability + face ROI + per-alert voice */
+.login-screen { place-items:center; }
+.login-card { margin-inline:auto !important; }
+.hero-panel { grid-template-columns:minmax(0,1.18fr) minmax(330px,.82fr); }
+.hero-panel h2 { font-size:clamp(32px,3.15vw,48px); line-height:1.18; word-break:keep-all; }
+.hero-no-break { display:inline-block; white-space:nowrap; }
+.hero-panel p:not(.eyebrow), .login-copy, .section-lead { word-break:keep-all; overflow-wrap:break-word; }
+.feature-switch-stack { display:grid; gap:9px; margin-top:14px; }
+.feature-switch-stack .switch-row { margin:0; }
+.voice-rule-row { border-color:rgba(255,209,102,.18); background:rgba(255,209,102,.035); }
+.voice-rule-row b { color:#f0d27f; }
+.voice-card small { display:block; margin:-4px 0 12px; color:var(--muted); line-height:1.55; }
+.audio-unlock-button { border-color:rgba(255,209,102,.42); color:#ffe49b; }
+@media (max-width:1180px) {
+  .hero-panel { grid-template-columns:1fr; }
+  .hero-panel h2 { font-size:34px; }
+}
+@media (max-width:900px) {
+  .login-card { margin-inline:auto !important; }
+  .hero-panel h2 { font-size:30px; }
+}
+@media (max-width:620px) {
+  .hero-panel h2 { font-size:25px; letter-spacing:-.05em; }
+}
+@media (max-width:430px) {
+  .hero-panel h2 { font-size:21px; letter-spacing:-.045em; }
 }

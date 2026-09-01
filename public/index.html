@@ -7,7 +7,7 @@
     <meta name="description" content="POSCO Future M 스마트 안전지킴이 - 브라우저 AI 안전 CCTV와 통합 관제" />
     <title>POSEIDON 스마트 안전지킴이 | POSCO Future M</title>
     <link rel="icon" href="/favicon.svg" />
-    <link rel="stylesheet" href="/styles.css?v=5.1.0" />
+    <link rel="stylesheet" href="/styles.css?v=6.1.0" />
   </head>
   <body>
     <div class="login-screen" id="loginScreen" hidden>
@@ -86,7 +86,7 @@
           <div class="hero-panel">
             <div>
               <p class="eyebrow">TRIDENT SAFETY INTELLIGENCE · DETECT · JUDGE · ALERT</p>
-              <h2>안전을 다스리는 삼지창,<br /><em>포세이돈</em>이 위험을 포착합니다.</h2>
+              <h2>안전을 다스리는 삼지창,<br /><span class="hero-no-break"><em>포세이돈</em>이 위험을 포착합니다.</span></h2>
               <p>감지 · 판단 · 전파의 세 갈래 안전 지능으로 브라우저 카메라를 AI 안전 CCTV로 전환하고 여러 현장을 한 화면에서 실시간 관제합니다.</p>
               <div class="hero-actions"><button class="primary-button" data-goto="live" type="button">실시간 관제 열기</button><button class="secondary-button" id="heroQrButton" type="button">현장 QR 만들기</button></div>
             </div>
@@ -212,7 +212,7 @@
 
         <section class="page admin-only" id="page-ppe">
           <div class="section-toolbar"><div><p class="eyebrow">PERSONAL PROTECTIVE EQUIPMENT</p><h2>근로자 보호구 감지</h2></div><button class="primary-button rule-save" type="button">규칙 저장</button></div>
-          <div class="config-layout"><aside class="panel config-sidebar"><label>대상 장치<select class="rule-device-select"></select></label><div class="voice-card"><span>자동 음성 경고</span><b>“안전모를 착용해주세요.”</b><button class="secondary-button speak-sample" data-text="안전모를 착용해주세요." type="button">음성 듣기</button></div></aside><div class="feature-grid" data-rule-group="ppe"></div></div>
+          <div class="config-layout"><aside class="panel config-sidebar"><label>대상 장치<select class="rule-device-select"></select></label><div class="voice-card"><span>항목별 자동 음성 경보</span><b>각 감지 카드에서 음성 ON/OFF</b><small>안전모·보안경·마스크 등 필요한 항목만 음성 경고를 켤 수 있습니다.</small><button class="secondary-button speak-sample" data-text="안전모를 착용해주세요." type="button">음성 시험</button></div></aside><div class="feature-grid" data-rule-group="ppe"></div></div>
         </section>
 
         <section class="page admin-only" id="page-behavior">
@@ -270,7 +270,7 @@
     </div>
 
     <div class="modal-backdrop" id="callModal" hidden>
-      <section class="modal-card call-modal-card" role="dialog" aria-modal="true" aria-labelledby="callTitle"><button class="modal-close" id="callCloseButton" type="button">×</button><div class="call-orb" id="callOrb"><span>◖</span></div><p class="eyebrow" id="callEyebrow">TWO-WAY RADIO</p><h2 id="callTitle">관제센터 호출</h2><p id="callDescription">연결을 준비하고 있습니다.</p><div class="incoming-actions" id="incomingCallActions" hidden><button class="danger-button" id="rejectCallButton" type="button">거절</button><button class="primary-button" id="acceptCallButton" type="button">응답</button></div><div class="active-call-actions" id="activeCallActions" hidden><button class="ptt-button" id="pttButton" type="button"><span>●</span><b>누르고 말하기</b><small>버튼을 누른 동안 현장에 음성이 전송됩니다.</small></button><button class="danger-button full-button" id="endCallButton" type="button">통화 종료</button></div><audio id="remoteCallAudio" autoplay></audio></section>
+      <section class="modal-card call-modal-card" role="dialog" aria-modal="true" aria-labelledby="callTitle"><button class="modal-close" id="callCloseButton" type="button">×</button><div class="call-orb" id="callOrb"><span>◖</span></div><p class="eyebrow" id="callEyebrow">TWO-WAY RADIO</p><h2 id="callTitle">관제센터 호출</h2><p id="callDescription">연결을 준비하고 있습니다.</p><div class="incoming-actions" id="incomingCallActions" hidden><button class="danger-button" id="rejectCallButton" type="button">거절</button><button class="primary-button" id="acceptCallButton" type="button">응답</button></div><div class="active-call-actions" id="activeCallActions" hidden><button class="secondary-button full-button audio-unlock-button" id="remoteAudioUnlock" type="button" hidden>🔊 상대방 음성 재생</button><button class="ptt-button" id="pttButton" type="button"><span>●</span><b>누르고 말하기</b><small>버튼을 누른 동안 현장에 음성이 전송됩니다.</small></button><button class="danger-button full-button" id="endCallButton" type="button">통화 종료</button></div><audio id="remoteCallAudio" autoplay playsinline></audio></section>
     </div>
 
     <div class="floating-call-alert" id="floatingCallAlert" hidden><span class="ring-dot"></span><div><b id="floatingCallTitle">현장 호출 수신</b><small id="floatingCallText">응답이 필요합니다.</small></div><button id="floatingCallOpen" type="button">확인</button></div>
@@ -278,6 +278,6 @@
     <div class="sidebar-scrim" id="sidebarScrim"></div>
 
     <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js" defer></script>
-    <script type="module" src="/app.js?v=5.3.0"></script>
+    <script type="module" src="/app.js?v=6.1.0"></script>
   </body>
 </html>

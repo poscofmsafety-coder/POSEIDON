@@ -1,4 +1,4 @@
-const POSEIDON_BUILD = "6.0.0";
+const POSEIDON_BUILD = "6.1.0";
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -76,7 +76,30 @@ const defaultConfig = () => ({
     smoke: false,
     fire: false,
   },
-  voice: { enabled: true, cooldownSeconds: 12, volume: 0.95 },
+  voice: {
+    enabled: true,
+    cooldownSeconds: 12,
+    volume: 0.95,
+    alerts: {
+      helmet: true,
+      safetyGlasses: true,
+      mask: true,
+      harness: true,
+      hookConnected: true,
+      dangerZone: true,
+      fall: true,
+      unsafePosture: true,
+      longStay: true,
+      forklift: true,
+      heavyEquipmentProximity: true,
+      crane: true,
+      agv: true,
+      obstacle: true,
+      blockedAisle: true,
+      smoke: true,
+      fire: true,
+    },
+  },
   detection: { confidence: 0.31, consecutiveFrames: 2, intervalMs: 1000 },
 });
 
@@ -91,6 +114,7 @@ const state = {
   zonePoints: [],
   zoneConfig: null,
   zoneBackground: null,
+  rtc: { relayConfigured: false, iceServerCount: 1 },
 };
 
 const realtime = {
@@ -164,6 +188,9 @@ const callState = {
   remoteStream: null,
   ringTimer: null,
   audioContext: null,
+  connectTimer: null,
+  disconnectTimer: null,
+  remoteAudioBlocked: false,
 };
 
 function escapeHtml(value) {
@@ -600,6 +627,11 @@ async function loadIceServers() {
     const result = await api("/api/ice");
     if (Array.isArray(result.iceServers) && result.iceServers.length) state.iceServers = result.iceServers;
   } catch { /* STUN default remains */ }
+  state.rtc.iceServerCount = state.iceServers.length;
+  state.rtc.relayConfigured = state.iceServers.some((server) => {
+    const urls = Array.isArray(server.urls) ? server.urls : [server.urls];
+    return urls.filter(Boolean).some((url) => String(url).startsWith("turn:" ) || String(url).startsWith("turns:"));
+  });
 }
 
 function websocketUrl(deviceId, role, clientId) {
@@ -617,7 +649,13 @@ function createSignal(deviceId, role, onMessage) {
     closed: false,
     reconnectTimer: null,
     send(message) {
-      if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify(message));
+      if (this.ws?.readyState !== WebSocket.OPEN) return false;
+      try {
+        this.ws.send(JSON.stringify(message));
+        return true;
+      } catch {
+        return false;
+      }
     },
     close() {
       this.closed = true;
@@ -884,6 +922,7 @@ function showCallModal(mode, title, description) {
   $("#callDescription").textContent = description;
   $("#incomingCallActions").hidden = mode !== "incoming";
   $("#activeCallActions").hidden = mode !== "active";
+  if (mode !== "active") $("#remoteAudioUnlock").hidden = true;
   $("#callOrb").className = `call-orb ${mode === "incoming" || mode === "outgoing" ? "ringing" : mode === "active" ? "connected" : ""}`;
 }
 
@@ -896,20 +935,30 @@ function findPeer(signal, role) {
   return [...signal.peers.values()].find((peer) => peer.role === role)?.clientId || null;
 }
 
-function initiateAdminCall(deviceId) {
+async function initiateAdminCall(deviceId) {
   const signal = realtime.adminSignals.get(deviceId);
   if (!signal) return toast("현장 장치가 온라인 상태가 아닙니다.");
   const peerId = findPeer(signal, "guard");
-  if (!peerId) return toast("현장 지킴이 연결을 찾지 못했습니다.");
-  beginOutgoingCall(signal, peerId, deviceId, state.devices.find((item) => item.id === deviceId)?.name || "현장 장치");
+  if (!peerId) return toast("현장 지킴이 연결을 찾지 못했습니다. 지킴이 화면이 켜져 있는지 확인해주세요.");
+  try {
+    await ensureCallMicrophone();
+    beginOutgoingCall(signal, peerId, deviceId, state.devices.find((item) => item.id === deviceId)?.name || "현장 장치");
+  } catch (error) {
+    toast(`무전용 마이크를 사용할 수 없습니다: ${error.message}`, 5000);
+  }
 }
 
-function initiateGuardCall() {
+async function initiateGuardCall() {
   const signal = guard.signal;
   if (!signal) return toast("관제 서버 연결이 필요합니다.");
   const peerId = findPeer(signal, "admin");
   if (!peerId) return toast("현재 접속 중인 관리자가 없습니다.");
-  beginOutgoingCall(signal, peerId, getGuardDeviceId(), "관제센터");
+  try {
+    await ensureCallMicrophone();
+    beginOutgoingCall(signal, peerId, getGuardDeviceId(), "관제센터");
+  } catch (error) {
+    toast(`무전용 마이크를 사용할 수 없습니다: ${error.message}`, 5000);
+  }
 }
 
 function beginOutgoingCall(signal, peerId, deviceId, targetName) {
@@ -920,9 +969,20 @@ function beginOutgoingCall(signal, peerId, deviceId, targetName) {
   callState.peerId = peerId;
   callState.deviceId = deviceId;
   callState.callId = uuid("call");
-  signal.send({ type: "call-request", to: peerId, callId: callState.callId, deviceId });
+  const sent = signal.send({ type: "call-request", to: peerId, callId: callState.callId, deviceId });
+  if (!sent) {
+    endCall(false);
+    return toast("무전 신호 연결이 아직 준비되지 않았습니다. 2~3초 뒤 다시 호출해주세요.", 5000);
+  }
   startRinging();
   showCallModal("outgoing", `${targetName} 호출 중`, "상대방이 응답하면 무전 통화가 연결됩니다.");
+  clearTimeout(callState.connectTimer);
+  callState.connectTimer = setTimeout(() => {
+    if (["outgoing", "connecting"].includes(callState.status)) {
+      toast("무전 응답/연결 시간이 초과되었습니다. 상대 장치의 브라우저와 네트워크를 확인해주세요.", 6000);
+      endCall(true);
+    }
+  }, 20000);
 }
 
 async function handleCallSignal(signal, message) {
@@ -960,7 +1020,8 @@ async function handleCallSignal(signal, message) {
     if (callState.pc) {
       await callState.pc.setRemoteDescription(message.description);
       await flushIce(pcKey("call", callState.deviceId, callState.peerId, callState.callId), callState.pc);
-      setCallConnected();
+      callState.status = "connecting";
+      showCallModal("outgoing", "무전 연결 확인 중", "음성 경로와 네트워크 연결을 확인하고 있습니다.");
     }
   } else if (message.type === "call-ice") {
     const key = pcKey("call", callState.deviceId, message.from, message.callId);
@@ -993,13 +1054,39 @@ function buildCallPeer() {
   };
   pc.ontrack = (event) => {
     callState.remoteStream = event.streams[0] || new MediaStream([event.track]);
-    $("#remoteCallAudio").srcObject = callState.remoteStream;
-    $("#remoteCallAudio").play().catch(() => {});
+    const audio = $("#remoteCallAudio");
+    audio.srcObject = callState.remoteStream;
+    audio.muted = false;
+    audio.volume = 1;
+    audio.play().then(() => {
+      callState.remoteAudioBlocked = false;
+      $("#remoteAudioUnlock").hidden = true;
+    }).catch(() => {
+      callState.remoteAudioBlocked = true;
+      $("#remoteAudioUnlock").hidden = false;
+      toast("상대방 음성이 차단되었습니다. '상대방 음성 재생'을 눌러주세요.", 6000);
+    });
+  };
+  pc.oniceconnectionstatechange = () => {
+    clearTimeout(callState.disconnectTimer);
+    if (["connected", "completed"].includes(pc.iceConnectionState)) setCallConnected();
+    if (pc.iceConnectionState === "failed") {
+      toast(state.rtc.relayConfigured ? "무전 네트워크 연결에 실패했습니다. 다시 호출해주세요." : "무전 P2P 연결에 실패했습니다. 사내망에서는 TURN 서버 설정이 필요할 수 있습니다.", 7000);
+      endCall(false);
+    } else if (pc.iceConnectionState === "disconnected") {
+      callState.disconnectTimer = setTimeout(() => {
+        if (pc.iceConnectionState === "disconnected") {
+          toast("무전 연결이 끊어졌습니다. 다시 호출해주세요.", 5000);
+          endCall(false);
+        }
+      }, 6000);
+    }
   };
   pc.onconnectionstatechange = () => {
     if (pc.connectionState === "connected") setCallConnected();
     if (["failed", "closed"].includes(pc.connectionState)) endCall(false);
   };
+  pc.onicecandidateerror = (event) => console.warn("radio ICE candidate error", event?.errorText || event);
   return pc;
 }
 
@@ -1019,7 +1106,8 @@ async function receiveCallOffer(message) {
   const answer = await pc.createAnswer();
   await pc.setLocalDescription(answer);
   callState.signal.send({ type: "call-answer", channel: "call", callId: callState.callId, description: pc.localDescription, to: message.from });
-  setCallConnected();
+  callState.status = "connecting";
+  showCallModal("outgoing", "무전 연결 확인 중", "음성 경로와 네트워크 연결을 확인하고 있습니다.");
 }
 
 async function acceptIncomingCall() {
@@ -1029,6 +1117,13 @@ async function acceptIncomingCall() {
     await ensureCallMicrophone();
     callState.signal.send({ type: "call-accept", to: callState.peerId, callId: callState.callId });
     showCallModal("outgoing", "무전 연결 중", "상대방의 음성 채널을 기다리고 있습니다.");
+    clearTimeout(callState.connectTimer);
+    callState.connectTimer = setTimeout(() => {
+      if (["incoming", "connecting"].includes(callState.status)) {
+        toast("무전 음성 연결 시간이 초과되었습니다. 네트워크를 확인한 뒤 다시 호출해주세요.", 6000);
+        endCall(true);
+      }
+    }, 20000);
   } catch (error) {
     toast(`마이크를 사용할 수 없습니다: ${error.message}`);
     callState.signal.send({ type: "call-reject", to: callState.peerId, callId: callState.callId });
@@ -1042,9 +1137,13 @@ function rejectIncomingCall() {
 }
 
 function setCallConnected() {
+  if (callState.status === "connected") return;
   callState.status = "connected";
+  clearTimeout(callState.connectTimer);
+  callState.connectTimer = null;
   stopRinging();
-  showCallModal("active", "무전 통화 연결됨", "말하기 버튼을 누른 동안 상대방에게 음성이 전달됩니다.");
+  const pathLabel = state.rtc.relayConfigured ? "P2P/TURN 자동 연결" : "P2P 연결";
+  showCallModal("active", "무전 통화 연결됨", `${pathLabel} · 말하기 버튼을 누른 동안 상대방에게 음성이 전달됩니다.`);
   $("#floatingCallAlert").hidden = true;
   $("#guardRadioIndicator").textContent = "통화 중";
   $("#guardRadioIndicator").classList.add("active");
@@ -1061,12 +1160,17 @@ function setPushToTalk(active) {
 function endCall(notify = true) {
   if (notify && callState.signal && callState.peerId && callState.callId) callState.signal.send({ type: "call-end", to: callState.peerId, callId: callState.callId });
   stopRinging();
+  clearTimeout(callState.connectTimer);
+  clearTimeout(callState.disconnectTimer);
+  callState.connectTimer = null;
+  callState.disconnectTimer = null;
   setPushToTalk(false);
   try { callState.pc?.close(); } catch { /* noop */ }
   if (callState.localStream && callState.localStream !== guard.stream) callState.localStream.getTracks().forEach((track) => track.stop());
   if (callState.localStream === guard.stream && callState.localTrack) callState.localTrack.enabled = false;
-  Object.assign(callState, { status: "idle", direction: null, deviceId: null, peerId: null, signal: null, callId: null, pc: null, localStream: null, localTrack: null, remoteStream: null });
+  Object.assign(callState, { status: "idle", direction: null, deviceId: null, peerId: null, signal: null, callId: null, pc: null, localStream: null, localTrack: null, remoteStream: null, remoteAudioBlocked: false });
   $("#remoteCallAudio").srcObject = null;
+  $("#remoteAudioUnlock").hidden = true;
   $("#guardRadioIndicator").textContent = "대기";
   $("#guardRadioIndicator").classList.remove("active");
   hideCallModal();
@@ -1498,6 +1602,12 @@ function clearGuardOverlay() {
   canvas.getContext("2d").clearRect(0, 0, canvas.width, canvas.height);
 }
 
+function voiceAlertEnabled(key) {
+  if (guard.config.voice?.enabled === false) return false;
+  const alerts = guard.config.voice?.alerts || {};
+  return alerts[key] !== false;
+}
+
 function processGuardDetections(message) {
   resizeGuardOverlay();
   const detections = message.detections || [];
@@ -1537,15 +1647,28 @@ function processGuardDetections(message) {
   if (ppeProblems.length) {
     const directMissing = [];
     const checkNeeded = [];
+    const enabledPpeChecks = [
+      ["helmet", "안전모", rules.helmet !== false],
+      ["goggles", "보안경", rules.safetyGlasses !== false],
+      ["mask", "마스크", rules.mask !== false],
+    ];
     for (const item of assessments) {
-      for (const [key, korean] of [["helmet", "안전모"], ["goggles", "보안경"], ["mask", "마스크"]]) {
+      for (const [key, korean, enabled] of enabledPpeChecks) {
+        if (!enabled) continue;
         if (item[key].state === "NF" && !directMissing.includes(korean)) directMissing.push(korean);
         if (item[key].state === "CHECK" && !checkNeeded.includes(korean)) checkNeeded.push(korean);
       }
     }
     const voiceParts = [];
-    if (directMissing.length) voiceParts.push(`${directMissing.join(", ")}를 착용해주세요.`);
-    if (checkNeeded.length) voiceParts.push(`${checkNeeded.join(", ")} 착용 상태를 확인해주세요.`);
+    const voiceNames = {
+      "안전모": "helmet",
+      "보안경": "safetyGlasses",
+      "마스크": "mask",
+    };
+    const directVoice = directMissing.filter((name) => voiceAlertEnabled(voiceNames[name]));
+    const checkVoice = checkNeeded.filter((name) => voiceAlertEnabled(voiceNames[name]));
+    if (directVoice.length) voiceParts.push(`${directVoice.join(", ")}를 착용해주세요.`);
+    if (checkVoice.length) voiceParts.push(`${checkVoice.join(", ")} 착용 상태를 확인해주세요.`);
     const voice = voiceParts.join(" ");
     violations.push(["ppe-summary", {
       type: "PPE_CHECK_REQUIRED",
@@ -1557,9 +1680,9 @@ function processGuardDetections(message) {
     }]);
   }
 
-  if (rules.harness && noHarness.length) violations.push(["harness", { type: "HARNESS_NOT_DETECTED", category: "보호구", severity: "high", message: "안전대 미착용 의심 상황이 감지되었습니다.", voice: "안전대를 착용해주세요.", metadata: { count: noHarness.length } }]);
-  if (rules.fall !== false && falls.length) violations.push(["fall", { type: "FALL_CANDIDATE", category: "불안전 행동", severity: "critical", message: "넘어짐 의심 상황이 감지되었습니다.", voice: "넘어짐 위험이 감지되었습니다. 확인해주세요.", metadata: { count: falls.length } }]);
-  if (zoneEntries.length) violations.push(["zone", { type: "DANGER_ZONE_ENTRY", category: "위험구역", severity: "high", message: `${zoneEntries[0].zone.name}에 작업자가 진입했습니다.`, voice: "위험구역입니다. 즉시 이동해주세요.", metadata: { count: zoneEntries.length, zone: zoneEntries[0].zone.name } }]);
+  if (rules.harness && noHarness.length) violations.push(["harness", { type: "HARNESS_NOT_DETECTED", category: "보호구", severity: "high", message: "안전대 미착용 의심 상황이 감지되었습니다.", voice: "안전대를 착용해주세요.", voiceKey: "harness", metadata: { count: noHarness.length } }]);
+  if (rules.fall !== false && falls.length) violations.push(["fall", { type: "FALL_CANDIDATE", category: "불안전 행동", severity: "critical", message: "넘어짐 의심 상황이 감지되었습니다.", voice: "넘어짐 위험이 감지되었습니다. 확인해주세요.", voiceKey: "fall", metadata: { count: falls.length } }]);
+  if (zoneEntries.length) violations.push(["zone", { type: "DANGER_ZONE_ENTRY", category: "위험구역", severity: "high", message: `${zoneEntries[0].zone.name}에 작업자가 진입했습니다.`, voice: "위험구역입니다. 즉시 이동해주세요.", voiceKey: "dangerZone", metadata: { count: zoneEntries.length, zone: zoneEntries[0].zone.name } }]);
 
   const presentKeys = new Set(violations.map(([key]) => key));
   for (const key of ["ppe-summary", "harness", "fall", "zone"]) {
@@ -1635,9 +1758,29 @@ function buildPpeAssessments(detections, sourceWidth, sourceHeight, yolo11Person
       return { state: "CHECK", score: Math.max(pos?.score || 0, neg?.score || 0), direct: false, sufficientlyVisible };
     };
 
+    const headCandidates = related
+      .filter((det) => ["Hardhat", "NO-Hardhat"].includes(det.label))
+      .sort((a, b) => b.score - a.score);
+    const head = anchor.label !== "Person"
+      ? anchor
+      : headCandidates.find((det) =>
+        det.width <= anchor.width * 0.92 &&
+        det.height <= anchor.height * 0.62 &&
+        det.y <= anchor.y + anchor.height * 0.55
+      );
+    const displayBox = head || {
+      x: anchor.x + anchor.width * 0.18,
+      y: anchor.y + anchor.height * 0.02,
+      width: anchor.width * 0.64,
+      height: Math.min(anchor.height * 0.38, anchor.width * 0.72),
+      score: anchor.score,
+      label: "FACE-ROI",
+    };
+
     return {
       id: index + 1,
       anchor,
+      displayBox,
       helmet: assess("Hardhat", "NO-Hardhat"),
       goggles: assess("Goggles", "NO-Goggles"),
       mask: assess("Mask", "NO-Mask"),
@@ -2019,7 +2162,9 @@ function ppeStatusStyle(status) {
 }
 
 function drawWorkerPpe(ctx, worker, scaleX, scaleY) {
-  const a = worker.anchor;
+  // AI internally keeps the full person box for counting, zone entry and tracking.
+  // The operator screen intentionally shows only a compact head/face ROI for readability.
+  const a = worker.displayBox || worker.anchor;
   const x = a.x * scaleX, y = a.y * scaleY;
   const w = a.width * scaleX, h = a.height * scaleY;
   const statuses = [
@@ -2027,29 +2172,34 @@ function drawWorkerPpe(ctx, worker, scaleX, scaleY) {
     ["GOG", worker.goggles],
     ["MASK", worker.mask],
   ];
-  const worst = statuses.some(([,s]) => s.state === "NF") ? "NF" : statuses.some(([,s]) => s.state === "CHECK") ? "CHECK" : "OK";
+  const worst = statuses.some(([, status]) => status.state === "NF") ? "NF" : statuses.some(([, status]) => status.state === "CHECK") ? "CHECK" : "OK";
   const border = ppeStatusStyle({ state: worst });
+
+  ctx.save();
   ctx.strokeStyle = border.color;
   ctx.lineWidth = worst === "NF" ? 4 : 3;
   ctx.strokeRect(x, y, w, h);
 
-  // Approximate head/eye/mouth regions so the three checks are visually distinct even when the base model returns only a head box.
-  const regionDefs = [
-    [worker.helmet, y, Math.max(16, h * 0.34)],
-    [worker.goggles, y + h * 0.28, Math.max(14, h * 0.22)],
-    [worker.mask, y + h * 0.50, Math.max(16, h * 0.30)],
-  ];
-  for (const [status, ry, rh] of regionDefs) {
-    const st = ppeStatusStyle(status);
-    ctx.strokeStyle = st.color;
-    ctx.lineWidth = 2;
-    ctx.strokeRect(x + w * 0.10, ry, w * 0.80, rh);
+  // Small corner accents make the ROI visible without covering the face.
+  const corner = Math.max(10, Math.min(w, h) * 0.13);
+  ctx.lineWidth = 5;
+  for (const [sx, sy, dx, dy] of [
+    [x, y, 1, 1], [x + w, y, -1, 1], [x, y + h, 1, -1], [x + w, y + h, -1, -1],
+  ]) {
+    ctx.beginPath();
+    ctx.moveTo(sx + dx * corner, sy);
+    ctx.lineTo(sx, sy);
+    ctx.lineTo(sx, sy + dy * corner);
+    ctx.stroke();
   }
+  ctx.restore();
 
-  statuses.forEach(([prefix, status], i) => {
+  const lineHeight = 25;
+  const labelY = Math.max(2, y - lineHeight * statuses.length - 3);
+  statuses.forEach(([prefix, status], index) => {
     const st = ppeStatusStyle(status);
     const pct = status.score > 0 ? ` ${Math.round(status.score * 100)}%` : "";
-    drawLabel(ctx, `${prefix}: ${st.suffix}${pct}`, x, Math.max(2, y - 24 - (2 - i) * 25), st.color, st.background);
+    drawLabel(ctx, `${prefix}: ${st.suffix}${pct}`, x, labelY + index * lineHeight, st.color, st.background);
   });
 }
 
@@ -2086,7 +2236,8 @@ function drawLabel(ctx, text, x, y, color, background) {
 async function triggerGuardEvent(event) {
   if (!guard.active) return;
   showGuardWarning(event.voice || event.message);
-  if ($("#guardVoiceEnabled").checked && guard.config.voice?.enabled !== false) speak(event.voice || event.message);
+  const voiceAllowed = event.voiceKey ? voiceAlertEnabled(event.voiceKey) : true;
+  if ($("#guardVoiceEnabled").checked && guard.config.voice?.enabled !== false && voiceAllowed && event.voice) speak(event.voice);
   const snapshotBase64 = captureGuardSnapshot();
   try {
     await api("/api/agents/event", { method: "POST", body: JSON.stringify({ deviceId: getGuardDeviceId(), id: uuid("evt"), occurredAt: new Date().toISOString(), type: event.type, category: event.category, severity: event.severity, message: event.message, metadata: event.metadata || {}, snapshotBase64 }) });
@@ -2237,7 +2388,7 @@ function renderRuleGroups() {
   for (const [group, definitions] of Object.entries(ruleGroups)) {
     const container = $(`[data-rule-group="${group}"]`);
     if (!container) continue;
-    container.innerHTML = definitions.map(([key, title, description, enabled]) => `<article class="feature-card"><h3>${escapeHtml(title)}</h3><p>${escapeHtml(description)}</p><label class="switch-row"><span><b>${enabled ? "활성 권장" : "선택 기능"}</b><small>장치별로 적용 여부를 설정합니다.</small></span><input type="checkbox" data-rule="${escapeHtml(key)}" ${enabled ? "checked" : ""} /></label></article>`).join("");
+    container.innerHTML = definitions.map(([key, title, description, enabled]) => `<article class="feature-card"><h3>${escapeHtml(title)}</h3><p>${escapeHtml(description)}</p><div class="feature-switch-stack"><label class="switch-row"><span><b>감지 기능</b><small>${enabled ? "활성 권장" : "선택 기능"} · 장치별 적용</small></span><input type="checkbox" data-rule="${escapeHtml(key)}" ${enabled ? "checked" : ""} /></label><label class="switch-row voice-rule-row"><span><b>자동 음성 경보</b><small>이 항목 감지 시 한국어 음성 안내</small></span><input type="checkbox" data-voice-rule="${escapeHtml(key)}" checked /></label></div></article>`).join("");
   }
 }
 
@@ -2249,6 +2400,7 @@ async function loadRuleEditor(group) {
   try {
     const config = await api(`/api/devices/${encodeURIComponent(deviceId)}/config`);
     $$(`#page-${group} [data-rule]`).forEach((input) => { input.checked = config.rules?.[input.dataset.rule] === true; });
+    $$(`#page-${group} [data-voice-rule]`).forEach((input) => { input.checked = config.voice?.alerts?.[input.dataset.voiceRule] !== false; });
   } catch { /* noop */ }
 }
 
@@ -2260,9 +2412,12 @@ async function saveCurrentRuleGroup(button) {
   try {
     const config = await api(`/api/devices/${encodeURIComponent(deviceId)}/config`);
     config.rules ||= {};
+    config.voice ||= { enabled: true, cooldownSeconds: 12, volume: 0.95 };
+    config.voice.alerts ||= {};
     $$('[data-rule]', page).forEach((input) => { config.rules[input.dataset.rule] = input.checked; });
+    $$('[data-voice-rule]', page).forEach((input) => { config.voice.alerts[input.dataset.voiceRule] = input.checked; });
     await api(`/api/devices/${encodeURIComponent(deviceId)}/config`, { method: "PUT", body: JSON.stringify({ config }) });
-    toast("감지 규칙을 저장했습니다.");
+    toast("감지 규칙과 항목별 음성 경보를 저장했습니다.");
   } catch (error) { toast(error.message); }
 }
 
@@ -2360,6 +2515,17 @@ function bindEvents() {
   $("#endCallButton").addEventListener("click", () => endCall(true));
   $("#callCloseButton").addEventListener("click", () => callState.status === "incoming" ? rejectIncomingCall() : endCall(true));
   $("#floatingCallOpen").addEventListener("click", () => { $("#callModal").hidden = false; });
+  $("#remoteAudioUnlock").addEventListener("click", async () => {
+    unlockAudio();
+    try {
+      await $("#remoteCallAudio").play();
+      callState.remoteAudioBlocked = false;
+      $("#remoteAudioUnlock").hidden = true;
+      toast("상대방 음성을 재생합니다.");
+    } catch (error) {
+      toast(`음성 재생을 시작할 수 없습니다: ${error.message}`, 5000);
+    }
+  });
   const ptt = $("#pttButton");
   ["pointerdown", "touchstart"].forEach((name) => ptt.addEventListener(name, (event) => { event.preventDefault(); setPushToTalk(true); }, { passive: false }));
   ["pointerup", "pointercancel", "pointerleave", "touchend"].forEach((name) => ptt.addEventListener(name, (event) => { event.preventDefault(); setPushToTalk(false); }, { passive: false }));
