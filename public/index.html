@@ -429,24 +429,30 @@
               <div class="gps-coordinate-grid"><div><span>위도</span><b id="gpsLat">-</b></div><div><span>경도</span><b id="gpsLng">-</b></div><div><span>정확도</span><b id="gpsAccuracy">-</b></div></div>
               <div class="emergency-actions"><button class="primary-button" id="getEmergencyLocation" type="button">GPS 위치 확인</button><button class="danger-button" id="sendEmergencyLocation" type="button">관리자에게 위치 전송</button><button class="secondary-button" id="openEmergencyMap" type="button" disabled>지도 열기</button><button class="secondary-button" id="copyEmergencyCoordinates" type="button" disabled>좌표 복사</button></div>
               <div class="emergency-reporter-grid"><label>신고자/연락자 이름<input id="emergencyReporterName" maxlength="40" placeholder="선택 입력" /></label><label>연락처<input id="emergencyReporterContact" maxlength="60" placeholder="휴대전화/내선" /></label></div>
-              <label>상황 메모<textarea id="emergencyNote" rows="3" maxlength="600" placeholder="예: 2층 설비실에서 작업자 부상, 의식 있음"></textarea></label>
+              <label class="emergency-note-field"><span>상황 메모</span><textarea id="emergencyNote" rows="4" maxlength="600" placeholder="예: 2층 설비실에서 작업자 부상, 의식 있음"></textarea></label>
             </section>
             <section class="panel emergency-contacts-card">
               <div class="panel-header"><div><p class="eyebrow">EMERGENCY CONTACTS</p><h3>비상연락망</h3><p>직원 개인 이름·휴대전화는 기본 데이터에서 제외하고, 기관·부서 중심으로 구성했습니다.</p></div><span class="contact-count" id="emergencyContactCount">0개</span></div>
               <label class="emergency-region-filter">지역 필터<select id="emergencyRegionFilter"><option value="">전체 지역</option></select></label>
               <div class="emergency-contact-list" id="emergencyContactList"></div>
-              <div class="admin-only emergency-contact-admin">
-                <div class="divider-label">관리자 연락망 편집 · 필요 시 부서/이름/연락처를 직접 추가</div>
-                <div class="emergency-contact-editor-head"><span>지역</span><span>구분</span><span>부서/기관</span><span>이름(선택)</span><span>연락처</span><span>비고</span><span></span></div>
-                <div id="emergencyContactEditor"></div>
-                <div class="emergency-actions"><button class="secondary-button" id="addEmergencyContact" type="button">연락처 추가</button><button class="primary-button" id="saveEmergencyContacts" type="button">비상연락망 저장</button></div>
-              </div>
+
             </section>
           </div>
+          <section class="panel admin-only emergency-contact-admin emergency-contact-admin-wide">
+            <div class="panel-header emergency-contact-admin-header">
+              <div><p class="eyebrow">ADMIN DIRECTORY EDITOR</p><h3>관리자 연락망 편집</h3><p>필요 시 부서·기관, 이름, 연락처, 비고를 직접 추가·수정·삭제할 수 있습니다.</p></div>
+              <span class="contact-editor-chip">EDIT</span>
+            </div>
+            <div class="emergency-contact-editor-head"><span>지역</span><span>구분</span><span>부서/기관</span><span>이름(선택)</span><span>연락처</span><span>비고</span><span></span></div>
+            <div id="emergencyContactEditor"></div>
+            <div class="emergency-actions emergency-contact-admin-actions"><button class="secondary-button" id="addEmergencyContact" type="button">연락처 추가</button><button class="primary-button" id="saveEmergencyContacts" type="button">비상연락망 저장</button></div>
+          </section>
           <section class="panel emergency-chart-panel">
             <div class="panel-header"><div><p class="eyebrow">EMERGENCY REPORTING CHART</p><h3>전사 안전·환경 비상상황 보고체계도</h3></div><span class="chart-zoom-rate" id="emergencyChartZoomRate">100%</span></div>
-            <div class="emergency-chart-toolbar"><button class="secondary-button" id="emergencyChartZoomOut" type="button">축소 −</button><button class="secondary-button" id="emergencyChartZoomIn" type="button">확대 ＋</button><button class="secondary-button" id="emergencyChartReset" type="button">원본 크기</button><button class="secondary-button" id="emergencyChartFit" type="button">화면 맞춤</button><a class="secondary-button" id="emergencyChartDownload" href="#" download hidden>이미지 저장</a><button class="secondary-button" id="emergencyChartPrint" type="button">인쇄 / PDF</button></div>
-            <div class="admin-only emergency-chart-upload"><label class="secondary-button file-button">보고체계도 이미지 등록<input id="emergencyChartFile" type="file" accept="image/png,image/jpeg,image/webp" hidden /></label><small>개인정보가 포함된 원본을 등록할 경우 사내 기준에 맞게 관리해주세요. 관리자·현장 사용자가 같은 보고체계도를 봅니다.</small></div>
+            <div class="emergency-chart-controls">
+              <div class="admin-only emergency-chart-upload"><label class="primary-button file-button">보고체계도 이미지 등록<input id="emergencyChartFile" type="file" accept="image/png,image/jpeg,image/webp" hidden /></label><small>등록한 이미지는 관리자와 현장 사용자가 같은 화면에서 확인합니다. 개인정보가 포함된 경우 사내 기준에 맞게 관리해주세요.</small></div>
+              <div class="emergency-chart-toolbar"><button class="secondary-button" id="emergencyChartZoomOut" type="button">축소 −</button><button class="secondary-button" id="emergencyChartZoomIn" type="button">확대 ＋</button><button class="secondary-button" id="emergencyChartReset" type="button">원본 크기</button><button class="secondary-button" id="emergencyChartFit" type="button">화면 맞춤</button><a class="secondary-button" id="emergencyChartDownload" href="#" download hidden>이미지 저장</a><button class="secondary-button" id="emergencyChartPrint" type="button">인쇄 / PDF</button></div>
+            </div>
             <div class="emergency-chart-viewport" id="emergencyChartViewport"><div class="emergency-chart-document" id="emergencyChartDocument"><img id="emergencyChartImage" alt="전사 안전·환경 비상상황 보고체계도" hidden /><div class="emergency-chart-empty" id="emergencyChartEmpty">등록된 비상상황 보고체계도 이미지가 없습니다. 관리자가 이미지를 등록해주세요.</div></div></div>
           </section>
         </section>

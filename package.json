@@ -1,6 +1,6 @@
 {
   "name": "poseidon-smart-safety",
-  "version": "6.12.0",
+  "version": "6.13.0",
   "private": true,
   "type": "module",
   "description": "POSEIDON - POSCO Future M browser-based AI smart safety command platform",

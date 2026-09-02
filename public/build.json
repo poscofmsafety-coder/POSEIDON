@@ -1,6 +1,6 @@
 {
   "project": "POSEIDON",
-  "version": "6.12.0",
+  "version": "6.13.0",
   "theme": "mythology-command",
   "cloudflare": "workers+d1+durable-objects",
   "durableObjects": "exports-sqlite",
@@ -30,5 +30,6 @@
   "emergency119": "editable-site-call+tel-link+browser-geolocation+admin-event+privacy-safe-contacts+report-chart",
   "dSafetyMeeting": "excel-paste-viewer+worker-opinion-d1",
   "privacy": "face-mosaic-live+preview+snapshot+stop-work-video",
-  "emergencyContacts": "public-org-defaults+region-filter+admin-add-delete-edit+no-employee-pii-defaults"
+  "emergencyContacts": "public-org-defaults+region-filter+admin-add-delete-edit+no-employee-pii-defaults",
+  "emergencyUi": "memo-field-fix+top-aligned-cards+wide-contact-editor+centered-chart-upload"
 }

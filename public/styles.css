@@ -1204,3 +1204,46 @@ button, .top-action, .icon-button, .table-action { min-height: 42px; }
 @media (max-width:1180px){.emergency-call-selector-panel{grid-template-columns:1fr 1fr}.emergency-call-selector-panel>div:first-child{grid-column:1/-1}.emergency-call-current{align-self:stretch}.emergency-contact-editor-head{display:none}.emergency-contact-edit-row{grid-template-columns:repeat(2,minmax(0,1fr)) 42px!important;padding:10px;border:1px solid rgba(80,181,201,.13);border-radius:12px}.emergency-contact-edit-row input[data-contact-field="note"]{grid-column:1/3}.emergency-call-editor-head{display:none}.emergency-call-edit-row{grid-template-columns:70px 1fr 1fr 42px;padding:9px;border:1px solid rgba(80,181,201,.13);border-radius:12px}.emergency-call-edit-row input[data-call-field="phone"]{grid-column:2/4}}
 @media (max-width:720px){.emergency-call-selector-panel{grid-template-columns:1fr}.emergency-call-selector-panel>div:first-child{grid-column:auto}.emergency-call-admin{grid-column:auto}.emergency-region-filter{grid-template-columns:1fr;justify-content:stretch}.emergency-contact-edit-row{grid-template-columns:1fr 42px!important}.emergency-contact-edit-row input{grid-column:1!important}.emergency-contact-edit-row .contact-row-delete{grid-column:2;grid-row:1}.emergency-call-edit-row{grid-template-columns:70px 1fr 42px}.emergency-call-edit-row input{grid-column:2!important}.emergency-call-edit-row .contact-row-delete{grid-column:3;grid-row:1}.emergency-call-edit-row input[data-call-field="site"]{grid-row:1}.emergency-call-edit-row input[data-call-field="label"]{grid-row:2}.emergency-call-edit-row input[data-call-field="phone"]{grid-row:3}.emergency-call-hero{min-width:135px;padding:13px 16px}.emergency-call-hero span{font-size:28px}}
 .emergency-contact-admin #emergencyContactEditor{max-height:560px;overflow:auto;padding-right:4px;overscroll-behavior:contain}.emergency-call-admin #emergencyCallEditor{max-height:340px;overflow:auto;padding-right:4px}
+
+
+/* === V6.13 emergency UI layout polish === */
+.emergency-layout{align-items:start}
+.emergency-location-card,.emergency-contacts-card{align-self:start}
+.emergency-location-card>p{margin:.2rem 0 0;color:#9ab4bf;line-height:1.65}
+.emergency-reporter-grid label,.emergency-note-field{display:grid;gap:8px;color:var(--muted);font-size:12px}
+.emergency-note-field{margin-top:14px;width:100%}
+.emergency-note-field span{font-weight:800;color:#c9dce2}
+.emergency-note-field textarea{display:block;width:100%;min-height:118px;padding:13px 14px;resize:vertical;color:var(--text);background:#081723;border:1px solid var(--line);border-radius:12px;outline:none;font:inherit;line-height:1.6}
+.emergency-note-field textarea:focus{border-color:var(--cyan);box-shadow:0 0 0 3px rgba(89,224,220,.10)}
+.emergency-contact-list{max-height:560px;overflow:auto;padding-right:5px;overscroll-behavior:contain;scrollbar-width:thin}
+.emergency-contact-admin-wide{margin:0 0 18px!important;padding:22px;overflow:hidden}
+.emergency-contact-admin-header{align-items:flex-start;margin-bottom:14px}
+.emergency-contact-admin-header p:not(.eyebrow){margin:.35rem 0 0;color:#8ca9b5;line-height:1.6}
+.contact-editor-chip{display:inline-flex;align-items:center;justify-content:center;min-width:58px;height:32px;border:1px solid rgba(83,222,233,.35);border-radius:999px;color:#69e3ec;background:rgba(39,202,220,.08);font-size:11px;font-weight:900;letter-spacing:.08em}
+.emergency-contact-admin-wide .emergency-contact-editor-head{grid-template-columns:110px 130px minmax(210px,1.45fr) minmax(140px,.9fr) minmax(165px,.95fr) minmax(220px,1.35fr) 46px}
+.emergency-contact-admin-wide .emergency-contact-edit-row{grid-template-columns:110px 130px minmax(210px,1.45fr) minmax(140px,.9fr) minmax(165px,.95fr) minmax(220px,1.35fr) 46px!important}
+.emergency-contact-admin-wide #emergencyContactEditor{max-height:500px;overflow:auto;padding-right:6px;overscroll-behavior:contain;scrollbar-width:thin}
+.emergency-contact-admin-actions{justify-content:flex-end;margin-bottom:0}
+.emergency-chart-controls{display:grid;justify-items:center;gap:12px;margin:8px 0 16px}
+.emergency-chart-toolbar{justify-content:center;margin:0}
+.emergency-chart-upload{width:100%;display:grid;justify-items:center;gap:8px;margin:0;text-align:center}
+.emergency-chart-upload .file-button{min-width:260px;justify-content:center}
+.emergency-chart-upload small{display:block;max-width:760px;color:#91aab4;line-height:1.6}
+@media(max-width:1180px){
+  .emergency-contact-admin-wide .emergency-contact-editor-head{display:none}
+  .emergency-contact-admin-wide .emergency-contact-edit-row{grid-template-columns:repeat(2,minmax(0,1fr)) 46px!important;padding:10px;border:1px solid rgba(80,181,201,.13);border-radius:12px}
+  .emergency-contact-admin-wide .emergency-contact-edit-row input[data-contact-field="note"]{grid-column:1/3}
+}
+@media(max-width:720px){
+  .emergency-note-field textarea{min-height:132px}
+  .emergency-contact-list{max-height:430px}
+  .emergency-contact-admin-wide{padding:14px}
+  .emergency-contact-admin-header{gap:10px}
+  .emergency-contact-admin-wide .emergency-contact-edit-row{grid-template-columns:1fr 42px!important}
+  .emergency-contact-admin-wide .emergency-contact-edit-row input{grid-column:1!important}
+  .emergency-contact-admin-wide .emergency-contact-edit-row .contact-row-delete{grid-column:2;grid-row:1}
+  .emergency-contact-admin-actions>*{flex:1 1 100%}
+  .emergency-chart-upload .file-button{width:min(100%,360px);min-width:0}
+  .emergency-chart-toolbar{width:100%}
+  .emergency-chart-toolbar>*{flex:1 1 42%}
+}
