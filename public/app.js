@@ -1,4 +1,4 @@
-const POSEIDON_BUILD = "6.12.0";
+const POSEIDON_BUILD = "6.14.0";
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -126,7 +126,7 @@ const state = {
   emergencyAlertInitialized: false,
   msds: { items: [], selectedId: null, query: "", stats: { count: 0, totalBytes: 0, softLimitBytes: 0 }, selectedFile: null },
   emergency: { config: null, position: null, chartScale: 1 },
-  dSafety: { boards: [], selectedId: null, current: null, preview: null },
+  dSafety: { boards: [], selectedId: null, current: null, preview: null, siteFilter: "", dateFilter: "", retention: null },
 };
 
 const realtime = {
@@ -3796,7 +3796,7 @@ function renderEmergencyContacts() {
     const person = item.name && item.name !== department ? item.name : "";
     const meta = [item.region || "공통", item.type || "비상"].filter(Boolean).join(" · ");
     const sub = [person ? `이름: ${person}` : "", item.note || ""].filter(Boolean).join(" · ");
-    return `<article class="emergency-contact-item"><span>${escapeHtml(meta)}</span><div><b>${escapeHtml(department)}</b><small>${escapeHtml(sub)}</small></div>${item.phone ? `<a href="${phoneHref(item.phone)}"><strong>${escapeHtml(item.phone)}</strong><small>전화</small></a>` : `<em>번호 미등록</em>`}</article>`;
+    return `<article class="emergency-contact-item"><span>${escapeHtml(meta)}</span><div><b>${escapeHtml(department)}</b><small>${escapeHtml(sub)}</small></div>${item.phone ? `<a href="${phoneHref(item.phone)}" aria-label="${escapeHtml(department)} ${escapeHtml(item.phone)} 전화 연결"><strong>${escapeHtml(item.phone)}</strong></a>` : `<em>번호 미등록</em>`}</article>`;
   }).join("") || `<div class="law-empty-state"><span>☎</span><h3>해당 지역 연락처가 없습니다</h3><p>관리자가 부서·기관·이름·연락처를 추가할 수 있습니다.</p></div>`;
   if ($("#emergencyContactCount")) $("#emergencyContactCount").textContent = selectedRegion ? `${visible.length}개 / 전체 ${contacts.length}개` : `${contacts.length}개`;
 }
@@ -4033,6 +4033,7 @@ function parseDSafetyExcel(raw) {
   const nos = [...new Set([...risks.map((x) => x.no), ...actions.map((x) => x.no)])];
   const plant = (f[4] || "").trim(), place = (f[6] || "").trim();
   return {
+    site: plant,
     meetingDate: f[0] || "", workTime: f[9] || "", location: plant && place && plant.replace(/\s+/g, "") !== place.replace(/\s+/g, "") ? `${plant} / ${place}` : (plant || place),
     jobName: f[7] || "", peopleCount: parseInt(f[8], 10) || 1, contractor: f[10] || "", workManager: f[12] || "", contractorManager: f[13] || "",
     monitorDept: (f[f.length - 3] || "").trim(), monitorName: (f[f.length - 2] || "").trim(), cctv: (f[f.length - 1] || "").trim(),
@@ -4040,16 +4041,51 @@ function parseDSafetyExcel(raw) {
   };
 }
 
+function normalizeDSafetyDate(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  let m = text.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
+  if (m) return `${m[1]}-${String(m[2]).padStart(2,"0")}-${String(m[3]).padStart(2,"0")}`;
+  m = text.match(/^(\d{1,2})[/.](\d{1,2})$/);
+  if (m) return `${new Date().getFullYear()}-${String(m[1]).padStart(2,"0")}-${String(m[2]).padStart(2,"0")}`;
+  return text.slice(0,10);
+}
+
+function dSafetySiteOf(board) {
+  return String(board?.site || String(board?.location || "").split("/")[0] || "미지정").trim() || "미지정";
+}
+
+function filteredDSafetyBoards() {
+  const site = state.dSafety.siteFilter || "";
+  const date = state.dSafety.dateFilter || "";
+  return (state.dSafety.boards || []).filter((board) => (!site || dSafetySiteOf(board) === site) && (!date || normalizeDSafetyDate(board.meetingDate) === date));
+}
+
+function renderDSafetySiteTabs() {
+  const box = $("#dSafetySiteTabs");
+  if (!box) return;
+  const sites = [...new Set((state.dSafety.boards || []).map(dSafetySiteOf).filter(Boolean))].sort((a,b) => a.localeCompare(b,"ko"));
+  if (state.dSafety.siteFilter && !sites.includes(state.dSafety.siteFilter)) state.dSafety.siteFilter = "";
+  box.innerHTML = [`<button type="button" data-dsafety-site="" class="${!state.dSafety.siteFilter ? "active" : ""}">전체 사업장</button>`, ...sites.map((site) => `<button type="button" data-dsafety-site="${escapeHtml(site)}" class="${state.dSafety.siteFilter === site ? "active" : ""}">${escapeHtml(site)}</button>`)].join("");
+  $$('[data-dsafety-site]', box).forEach((button) => button.addEventListener("click", async () => {
+    state.dSafety.siteFilter = button.dataset.dsafetySite || "";
+    renderDSafetySiteTabs();
+    renderDSafetySelect(true);
+    if (state.dSafety.selectedId) await openDSafetyBoard(state.dSafety.selectedId); else renderDSafetyBoard(null);
+  }));
+}
+
 function renderDSafetyBoard(board) {
   const viewer = $("#dSafetyViewer");
   if (!viewer) return;
   if (!board) {
-    viewer.innerHTML = `<div class="law-empty-state"><span>☷</span><h3>D-안전회의 자료가 없습니다</h3><p>관리자가 회의 결과를 변환·저장하면 현장에 표시됩니다.</p></div>`;
+    viewer.innerHTML = `<div class="law-empty-state"><span>☷</span><h3>D-안전회의 자료가 없습니다</h3><p>선택한 사업장·날짜 조건에 등록된 회의가 없습니다.</p></div>`;
     $("#dSafetyOpinionList").innerHTML = "";
     return;
   }
   const rows = Array.isArray(board.rows) ? board.rows : [];
-  viewer.innerHTML = `<section class="panel dsafety-board-card"><div class="dsafety-board-title"><div><p class="eyebrow">D-SAFETY COMMUNICATION BOARD</p><h3>${escapeHtml(board.meetingDate || "D-안전회의")} · ${escapeHtml(board.location || "작업장")}</h3></div><span>${escapeHtml(String(board.peopleCount || 0))}명</span></div><div class="dsafety-info-grid"><div><span>작업시간</span><b>${escapeHtml(board.workTime || "-")}</b></div><div><span>작업명</span><b>${escapeHtml(board.jobName || "-")}</b></div><div><span>수행사</span><b>${escapeHtml(board.contractor || "-")}</b></div><div><span>작업담당자</span><b>${escapeHtml(board.workManager || "-")}</b></div><div><span>수행사 담당자</span><b>${escapeHtml(board.contractorManager || "-")}</b></div><div><span>안전 Monitor</span><b>${escapeHtml(board.monitorName || "-")}${board.monitorDept ? ` (${escapeHtml(board.monitorDept)})` : ""}</b></div></div><div class="dsafety-risk-table-wrap"><table class="data-table dsafety-risk-table"><thead><tr><th>No.</th><th>⚠ 잠재위험</th><th>✓ 안전 조치사항</th></tr></thead><tbody>${rows.map((row) => `<tr><td>${escapeHtml(row.no)}</td><td>${escapeHtml(row.risk)}</td><td>${escapeHtml(row.action)}</td></tr>`).join("") || `<tr><td colspan="3">등록된 위험요인이 없습니다.</td></tr>`}</tbody></table></div></section>`;
+  const site = dSafetySiteOf(board);
+  viewer.innerHTML = `<section class="panel dsafety-board-card"><div class="dsafety-board-title"><div><p class="eyebrow">D-SAFETY COMMUNICATION BOARD</p><h3>${escapeHtml(board.meetingDate || "D-안전회의")} · ${escapeHtml(board.location || "작업장")}</h3></div><div><span class="dsafety-board-site">${escapeHtml(site)}</span><span>${escapeHtml(String(board.peopleCount || 0))}명</span></div></div><div class="dsafety-info-grid"><div><span>사업장</span><b>${escapeHtml(site)}</b></div><div><span>작업시간</span><b>${escapeHtml(board.workTime || "-")}</b></div><div><span>작업명</span><b>${escapeHtml(board.jobName || "-")}</b></div><div><span>수행사</span><b>${escapeHtml(board.contractor || "-")}</b></div><div><span>작업담당자</span><b>${escapeHtml(board.workManager || "-")}</b></div><div><span>수행사 담당자</span><b>${escapeHtml(board.contractorManager || "-")}</b></div></div><div class="dsafety-risk-table-wrap"><table class="data-table dsafety-risk-table"><thead><tr><th>No.</th><th>⚠ 잠재위험</th><th>✓ 안전 조치사항</th></tr></thead><tbody>${rows.map((row) => `<tr><td>${escapeHtml(row.no)}</td><td>${escapeHtml(row.risk)}</td><td>${escapeHtml(row.action)}</td></tr>`).join("") || `<tr><td colspan="3">등록된 위험요인이 없습니다.</td></tr>`}</tbody></table></div></section>`;
   renderDSafetyOpinions(board.opinions || []);
 }
 
@@ -4059,25 +4095,37 @@ function renderDSafetyOpinions(opinions = []) {
   list.innerHTML = opinions.length ? `<div class="divider-label">접수된 종사자 의견 ${opinions.length}건</div>${opinions.map((item) => `<article class="dsafety-opinion-item"><div><b>${escapeHtml(item.name)} · ${escapeHtml(item.affiliation)}</b><time>${formatDate(item.createdAt)}</time></div><p>${escapeHtml(item.content)}</p></article>`).join("")}` : `<div class="dsafety-opinion-empty">아직 등록된 종사자 의견이 없습니다.</div>`;
 }
 
-function renderDSafetySelect() {
+function renderDSafetySelect(resetSelection = false) {
   const select = $("#dSafetyBoardSelect");
-  const boards = state.dSafety.boards || [];
-  select.innerHTML = boards.map((board) => `<option value="${escapeHtml(board.id)}">${escapeHtml(board.meetingDate || "날짜 미입력")} · ${escapeHtml(board.location || board.jobName || "D-안전회의")}</option>`).join("") || `<option value="">등록된 D-안전회의 없음</option>`;
-  if (boards.some((item) => item.id === state.dSafety.selectedId)) select.value = state.dSafety.selectedId;
+  const boards = filteredDSafetyBoards().slice().sort((a,b) => (normalizeDSafetyDate(b.meetingDate) || b.createdAt || "").localeCompare(normalizeDSafetyDate(a.meetingDate) || a.createdAt || ""));
+  select.innerHTML = boards.map((board) => `<option value="${escapeHtml(board.id)}">${escapeHtml(board.meetingDate || "날짜 미입력")} · ${escapeHtml(dSafetySiteOf(board))} · ${escapeHtml(board.jobName || board.location || "D-안전회의")}</option>`).join("") || `<option value="">등록된 D-안전회의 없음</option>`;
+  if (!resetSelection && boards.some((item) => item.id === state.dSafety.selectedId)) select.value = state.dSafety.selectedId;
   else if (boards[0]) { state.dSafety.selectedId = boards[0].id; select.value = boards[0].id; }
+  else state.dSafety.selectedId = null;
+}
+
+async function loadDSafetyRetention() {
+  if (state.session?.role !== "admin") return;
+  try {
+    state.dSafety.retention = await api("/api/d-safety/retention");
+    if ($("#dSafetyRetentionEnabled")) $("#dSafetyRetentionEnabled").checked = state.dSafety.retention.enabled !== false;
+    if ($("#dSafetyRetentionDays")) $("#dSafetyRetentionDays").value = String(state.dSafety.retention.days || 180);
+    if ($("#dSafetyRetentionStatus")) $("#dSafetyRetentionStatus").textContent = `현재 ${state.dSafety.retention.boardCount || 0}건 · 종사자 의견 ${state.dSafety.retention.opinionCount || 0}건 · 기본 보관 ${state.dSafety.retention.days || 180}일`;
+  } catch (error) { if ($("#dSafetyRetentionStatus")) $("#dSafetyRetentionStatus").textContent = `보관현황 조회 실패: ${error.message}`; }
 }
 
 async function loadDSafetyBoards() {
   try {
     state.dSafety.boards = await api("/api/d-safety/boards");
+    renderDSafetySiteTabs();
     renderDSafetySelect();
-    if (state.dSafety.selectedId) await openDSafetyBoard(state.dSafety.selectedId);
-    else renderDSafetyBoard(null);
+    if (state.dSafety.selectedId) await openDSafetyBoard(state.dSafety.selectedId); else renderDSafetyBoard(null);
+    await loadDSafetyRetention();
   } catch (error) { toast(`D-안전회의 조회 실패: ${error.message}`); }
 }
 
 async function openDSafetyBoard(id) {
-  if (!id) return renderDSafetyBoard(null);
+  if (!id) { state.dSafety.selectedId = null; return renderDSafetyBoard(null); }
   state.dSafety.selectedId = id;
   try { state.dSafety.current = await api(`/api/d-safety/boards/${encodeURIComponent(id)}`); renderDSafetyBoard(state.dSafety.current); }
   catch (error) { toast(error.message); }
@@ -4085,9 +4133,15 @@ async function openDSafetyBoard(id) {
 
 function previewDSafetyExcel() {
   try {
-    state.dSafety.preview = parseDSafetyExcel($("#dSafetyExcelInput").value);
+    const parsed = parseDSafetyExcel($("#dSafetyExcelInput").value);
+    const siteInput = $("#dSafetySiteInput");
+    parsed.site = siteInput.value.trim() || parsed.site || "";
+    if (!parsed.site) throw new Error("사업장을 입력해주세요.");
+    siteInput.value = parsed.site;
+    localStorage.setItem("poseidon-dsafety-site", parsed.site);
+    state.dSafety.preview = parsed;
     renderDSafetyBoard({ ...state.dSafety.preview, id: "preview", opinions: [] });
-    $("#dSafetyImportStatus").textContent = `변환 완료 · 위험/조치 ${state.dSafety.preview.rows.length}개 · 작업인원 ${state.dSafety.preview.peopleCount}명`;
+    $("#dSafetyImportStatus").textContent = `변환 완료 · ${parsed.site} · 위험/조치 ${parsed.rows.length}개 · 작업인원 ${parsed.peopleCount}명`;
     $("#saveDSafetyBoard").disabled = false;
   } catch (error) { state.dSafety.preview = null; $("#saveDSafetyBoard").disabled = true; toast(error.message, 6000); }
 }
@@ -4096,10 +4150,13 @@ async function saveDSafetyBoard() {
   if (!state.dSafety.preview) return toast("먼저 엑셀 데이터를 변환해주세요.");
   try {
     const saved = await api("/api/d-safety/boards", { method: "POST", body: JSON.stringify(state.dSafety.preview) });
-    toast("D-안전회의 소통보드를 저장했습니다.");
+    toast(`${saved.site || "사업장"} D-안전회의 소통보드를 저장했습니다.`);
     state.dSafety.preview = null;
     $("#saveDSafetyBoard").disabled = true;
     $("#dSafetyExcelInput").value = "";
+    state.dSafety.siteFilter = saved.site || state.dSafety.siteFilter;
+    state.dSafety.dateFilter = normalizeDSafetyDate(saved.meetingDate);
+    if ($("#dSafetyDateFilter")) $("#dSafetyDateFilter").value = state.dSafety.dateFilter;
     await loadDSafetyBoards();
     state.dSafety.selectedId = saved.id;
     renderDSafetySelect();
@@ -4127,6 +4184,41 @@ async function deleteDSafetyBoard() {
   if (!state.dSafety.selectedId || !confirm("선택한 D-안전회의와 연결된 종사자 의견을 삭제할까요?")) return;
   try { await api(`/api/d-safety/boards/${encodeURIComponent(state.dSafety.selectedId)}`, { method: "DELETE" }); state.dSafety.selectedId = null; await loadDSafetyBoards(); toast("D-안전회의 자료를 삭제했습니다."); }
   catch (error) { toast(error.message); }
+}
+
+function clearDSafetyFilters() {
+  state.dSafety.siteFilter = "";
+  state.dSafety.dateFilter = "";
+  if ($("#dSafetyDateFilter")) $("#dSafetyDateFilter").value = "";
+  renderDSafetySiteTabs();
+  renderDSafetySelect(true);
+  if (state.dSafety.selectedId) openDSafetyBoard(state.dSafety.selectedId); else renderDSafetyBoard(null);
+}
+
+async function saveDSafetyRetention() {
+  const enabled = $("#dSafetyRetentionEnabled")?.checked !== false;
+  const days = Number($("#dSafetyRetentionDays")?.value || 180);
+  try { state.dSafety.retention = await api("/api/d-safety/retention", { method: "PUT", body: JSON.stringify({ enabled, days }) }); toast(`D-안전회의 보관기간을 ${days}일로 저장했습니다.`); await loadDSafetyRetention(); }
+  catch (error) { toast(error.message); }
+}
+
+async function cleanupDSafetyData() {
+  const days = Number($("#dSafetyRetentionDays")?.value || 180);
+  if (!confirm(`${days}일보다 오래 저장된 D-안전회의와 연결 의견을 정리할까요? 필요하면 먼저 JSON 백업을 받아주세요.`)) return;
+  try { const result = await api("/api/d-safety/cleanup", { method: "POST", body: JSON.stringify({ days }) }); toast(`기간 지난 D-안전회의 ${result.deleted || 0}건을 정리했습니다.`); state.dSafety.selectedId = null; await loadDSafetyBoards(); }
+  catch (error) { toast(error.message); }
+}
+
+async function backupDSafetyData() {
+  try {
+    const data = await api("/api/d-safety/export");
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json;charset=utf-8" });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = `POSEIDON_D-Safety_Backup_${new Date().toISOString().slice(0,10)}.json`;
+    document.body.appendChild(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+    toast(`D-안전회의 ${data.boards?.length || 0}건을 백업했습니다.`);
+  } catch (error) { toast(`백업 실패: ${error.message}`); }
 }
 
 async function loadPrivacyAdminEditor() {
@@ -4416,12 +4508,16 @@ function bindEvents() {
   $("#emergencyChartZoomOut")?.addEventListener("click", () => { state.emergency.chartScale -= .1; applyEmergencyChartZoom(); });
   $("#emergencyChartReset")?.addEventListener("click", () => { state.emergency.chartScale = 1; applyEmergencyChartZoom(); });
   $("#emergencyChartFit")?.addEventListener("click", fitEmergencyChart);
-  $("#emergencyChartPrint")?.addEventListener("click", () => { document.body.classList.add("print-emergency-chart"); window.print(); setTimeout(() => document.body.classList.remove("print-emergency-chart"), 300); });
   $("#previewDSafety")?.addEventListener("click", previewDSafetyExcel);
   $("#saveDSafetyBoard")?.addEventListener("click", saveDSafetyBoard);
   $("#dSafetyBoardSelect")?.addEventListener("change", (event) => openDSafetyBoard(event.target.value));
+  $("#dSafetyDateFilter")?.addEventListener("change", async (event) => { state.dSafety.dateFilter = event.target.value || ""; renderDSafetySelect(true); if (state.dSafety.selectedId) await openDSafetyBoard(state.dSafety.selectedId); else renderDSafetyBoard(null); });
+  $("#dSafetyClearFilters")?.addEventListener("click", clearDSafetyFilters);
   $("#submitDSafetyOpinion")?.addEventListener("click", submitDSafetyOpinion);
   $("#deleteDSafetyBoard")?.addEventListener("click", deleteDSafetyBoard);
+  $("#saveDSafetyRetention")?.addEventListener("click", saveDSafetyRetention);
+  $("#backupDSafety")?.addEventListener("click", backupDSafetyData);
+  $("#cleanupDSafety")?.addEventListener("click", cleanupDSafetyData);
   $("#privacyDeviceSelect")?.addEventListener("change", loadPrivacyAdminEditor);
   $("#saveAdminPrivacy")?.addEventListener("click", saveAdminPrivacy);
   const msdsDropZone = $("#msdsDropZone");
@@ -4557,6 +4653,7 @@ async function init() {
   const savedOpinionUser = JSON.parse(localStorage.getItem("poseidon-dsafety-opinion-user") || "{}");
   if ($("#dSafetyOpinionDept")) $("#dSafetyOpinionDept").value = savedOpinionUser.affiliation || "";
   if ($("#dSafetyOpinionName")) $("#dSafetyOpinionName").value = savedOpinionUser.name || "";
+  if ($("#dSafetySiteInput")) $("#dSafetySiteInput").value = localStorage.getItem("poseidon-dsafety-site") || "";
   updateGuardZoneModeUi();
   startGuardZoneEditorLoop();
   if ($("#trainingSavedCount")) $("#trainingSavedCount").textContent = `${guard.trainingSavedCount}건`;

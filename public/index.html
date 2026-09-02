@@ -410,7 +410,7 @@
             <div><p class="eyebrow">POSEIDON · EMERGENCY RESPONSE</p><h2>119 신고 · GPS 비상대응</h2><p class="section-lead">사업장별 긴급전화, 현재 GPS 위치, 비상연락망과 전사 비상상황 보고체계를 한 화면에서 확인합니다.</p></div>
             <a class="emergency-call-hero" id="emergencyCallButton" href="tel:119"><span>119</span><b id="emergencyCallHeroLabel">전화하기</b><small id="emergencyCallHeroNumber">119</small></a>
           </div>
-          <div class="emergency-warning panel"><span>!</span><p><b>생명·신체에 급박한 위험이 있으면 현장 비상전화 또는 119에 즉시 신고하세요.</b> 브라우저 GPS는 POSEIDON 관리자에게 위치를 전달하는 보조정보이며 전화 통화에 자동 첨부되지는 않습니다.</p></div>
+          <div class="emergency-warning panel"><span>!</span><div class="emergency-warning-copy"><b>생명·신체에 급박한 위험이 있으면 현장 비상전화 또는 119에 즉시 신고하세요.</b><span>브라우저 GPS는 POSEIDON 관리자에게 위치를 전달하는 보조정보이며 전화 통화에 자동 첨부되지는 않습니다.</span></div></div>
           <section class="panel emergency-call-selector-panel">
             <div><p class="eyebrow">SITE EMERGENCY CALL</p><h3>신고 전화 선택</h3><p>현장에 맞는 신고 번호를 선택하면 상단 전화 버튼이 즉시 바뀝니다. 광양·포항 현장은 전용 번호를 기본 제공하며, 관리자가 번호를 수정·추가·삭제할 수 있습니다.</p></div>
             <label>전화 연결 대상<select id="emergencyCallSelect"><option value="">불러오는 중...</option></select></label>
@@ -451,7 +451,7 @@
             <div class="panel-header"><div><p class="eyebrow">EMERGENCY REPORTING CHART</p><h3>전사 안전·환경 비상상황 보고체계도</h3></div><span class="chart-zoom-rate" id="emergencyChartZoomRate">100%</span></div>
             <div class="emergency-chart-controls">
               <div class="admin-only emergency-chart-upload"><label class="primary-button file-button">보고체계도 이미지 등록<input id="emergencyChartFile" type="file" accept="image/png,image/jpeg,image/webp" hidden /></label><small>등록한 이미지는 관리자와 현장 사용자가 같은 화면에서 확인합니다. 개인정보가 포함된 경우 사내 기준에 맞게 관리해주세요.</small></div>
-              <div class="emergency-chart-toolbar"><button class="secondary-button" id="emergencyChartZoomOut" type="button">축소 −</button><button class="secondary-button" id="emergencyChartZoomIn" type="button">확대 ＋</button><button class="secondary-button" id="emergencyChartReset" type="button">원본 크기</button><button class="secondary-button" id="emergencyChartFit" type="button">화면 맞춤</button><a class="secondary-button" id="emergencyChartDownload" href="#" download hidden>이미지 저장</a><button class="secondary-button" id="emergencyChartPrint" type="button">인쇄 / PDF</button></div>
+              <div class="emergency-chart-toolbar"><button class="secondary-button" id="emergencyChartZoomOut" type="button">축소 −</button><button class="secondary-button" id="emergencyChartZoomIn" type="button">확대 ＋</button><button class="secondary-button" id="emergencyChartReset" type="button">원본 크기</button><button class="secondary-button" id="emergencyChartFit" type="button">화면 맞춤</button><a class="secondary-button emergency-chart-save" id="emergencyChartDownload" href="#" download hidden>이미지 저장</a></div>
             </div>
             <div class="emergency-chart-viewport" id="emergencyChartViewport"><div class="emergency-chart-document" id="emergencyChartDocument"><img id="emergencyChartImage" alt="전사 안전·환경 비상상황 보고체계도" hidden /><div class="emergency-chart-empty" id="emergencyChartEmpty">등록된 비상상황 보고체계도 이미지가 없습니다. 관리자가 이미지를 등록해주세요.</div></div></div>
           </section>
@@ -460,12 +460,30 @@
         <section class="page" id="page-dsafety">
           <div class="section-toolbar dsafety-toolbar"><div><p class="eyebrow">D-SAFETY COMMUNICATION BOARD</p><h2>D-안전회의 · 위험요인 정리 뷰어</h2><p class="section-lead">D-안전회의 결과를 현장에 전파하고 종사자 의견을 태블릿·휴대폰에서 바로 수렴합니다.</p></div><span class="dsafety-source-chip">위험요인 · 안전조치 · 의견청취</span></div>
           <section class="panel dsafety-import-panel admin-only">
-            <div><p class="eyebrow">ADMIN EXCEL PASTE</p><h3>D-안전회의 결과 변환</h3><p>엑셀 행을 복사해서 붙여넣고 변환하면 작업정보·잠재위험·안전조치가 소통보드로 정리됩니다.</p></div>
-            <textarea id="dSafetyExcelInput" rows="7" placeholder="D-안전회의 결과 엑셀 행을 그대로 붙여넣으세요..."></textarea>
+            <div><p class="eyebrow">ADMIN EXCEL PASTE</p><h3>D-안전회의 결과 변환</h3><p>사업장을 지정한 뒤 엑셀 행을 붙여넣으면 작업정보·잠재위험·안전조치가 사업장별 소통보드로 정리됩니다.</p></div>
+            <div class="dsafety-import-inputs">
+              <label class="dsafety-site-input">사업장<input id="dSafetySiteInput" maxlength="80" placeholder="예: 광양 / 포항 / 세종 / 구미" /></label>
+              <textarea id="dSafetyExcelInput" rows="7" placeholder="D-안전회의 결과 엑셀 행을 그대로 붙여넣으세요..."></textarea>
+            </div>
             <div class="dsafety-import-actions"><button class="secondary-button" id="previewDSafety" type="button">소통보드로 변환</button><button class="primary-button" id="saveDSafetyBoard" type="button" disabled>변환 결과 저장</button></div>
             <small id="dSafetyImportStatus">엑셀 데이터를 붙여넣으면 원본 파일을 업로드하지 않고 브라우저에서 구조화합니다.</small>
           </section>
-          <section class="panel dsafety-selector-panel"><label>회의/작업 선택<select id="dSafetyBoardSelect"><option value="">등록된 D-안전회의 없음</option></select></label><button class="secondary-button admin-only" id="deleteDSafetyBoard" type="button">선택 회의 삭제</button></section>
+          <section class="panel dsafety-management-panel admin-only">
+            <div><p class="eyebrow">D-SAFETY DATA MANAGEMENT</p><h3>회의 데이터 보관·백업</h3><p>사업장·날짜별 회의 결과를 누적 관리합니다. 기본 보관기간은 180일이며, 삭제 전 JSON 백업을 받을 수 있습니다.</p></div>
+            <label class="switch-row compact"><span><b>자동 정리</b><small>저장일 기준으로 보관기간이 지난 회의를 매일 정리</small></span><input type="checkbox" id="dSafetyRetentionEnabled" checked /></label>
+            <label>보관기간<select id="dSafetyRetentionDays"><option value="90">90일</option><option value="180" selected>180일</option><option value="365">1년</option><option value="730">2년</option></select></label>
+            <div class="dsafety-management-actions"><button class="primary-button" id="saveDSafetyRetention" type="button">보관설정 저장</button><button class="secondary-button" id="backupDSafety" type="button">JSON 백업</button><button class="secondary-button" id="cleanupDSafety" type="button">기간 지난 데이터 정리</button></div>
+            <small id="dSafetyRetentionStatus">보관현황을 불러오는 중...</small>
+          </section>
+          <section class="panel dsafety-selector-panel">
+            <div class="dsafety-site-tabs" id="dSafetySiteTabs"><button class="active" type="button" data-dsafety-site="">전체 사업장</button></div>
+            <div class="dsafety-filter-row">
+              <label>날짜<input id="dSafetyDateFilter" type="date" /></label>
+              <label>회의/작업 선택<select id="dSafetyBoardSelect"><option value="">등록된 D-안전회의 없음</option></select></label>
+              <button class="secondary-button" id="dSafetyClearFilters" type="button">전체 보기</button>
+              <button class="secondary-button admin-only" id="deleteDSafetyBoard" type="button">선택 회의 삭제</button>
+            </div>
+          </section>
           <div id="dSafetyViewer" class="dsafety-viewer"><div class="law-empty-state"><span>☷</span><h3>D-안전회의 자료가 없습니다</h3><p>관리자가 회의 결과를 변환·저장하면 현장에 즉시 표시됩니다.</p></div></div>
           <section class="panel dsafety-opinion-panel">
             <div class="panel-header"><div><p class="eyebrow">WORKER VOICE</p><h3>종사자 의견청취</h3></div><span class="dsafety-badge">상시 입력</span></div>

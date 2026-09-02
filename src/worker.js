@@ -225,9 +225,14 @@ async function ensureSchema(env) {
   if (schemaReady) return;
   if (!env.DB) throw new Error("D1 바인딩 DB가 없습니다.");
   if (!schemaPromise) {
-    schemaPromise = env.DB.batch(SCHEMA.map((sql) => env.DB.prepare(sql)))
-      .then(() => { schemaReady = true; })
-      .catch((err) => { schemaPromise = null; throw err; });
+    schemaPromise = (async () => {
+      await env.DB.batch(SCHEMA.map((sql) => env.DB.prepare(sql)));
+      const dsColumns = await env.DB.prepare("PRAGMA table_info(d_safety_boards)").all();
+      const names = new Set((dsColumns.results || []).map((row) => String(row.name || "")));
+      if (!names.has("site")) await env.DB.prepare("ALTER TABLE d_safety_boards ADD COLUMN site TEXT NOT NULL DEFAULT ''").run();
+      await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_dsafety_site_created ON d_safety_boards(site, created_at DESC)").run();
+      schemaReady = true;
+    })().catch((err) => { schemaPromise = null; throw err; });
   }
   await schemaPromise;
 }
@@ -516,6 +521,35 @@ async function deleteAllEvents(env) {
     env.DB.prepare("DELETE FROM events"),
   ]);
   return { deleted };
+}
+
+
+async function getDSafetyRetentionSettings(env) {
+  const [daysValue, enabledValue, boardRow, opinionRow] = await Promise.all([
+    readSetting(env, "d_safety_retention_days", "180"),
+    readSetting(env, "d_safety_auto_cleanup", "true"),
+    env.DB.prepare("SELECT COUNT(*) AS count FROM d_safety_boards").first(),
+    env.DB.prepare("SELECT COUNT(*) AS count FROM d_safety_opinions").first(),
+  ]);
+  return {
+    days: Math.min(730, Math.max(30, Number(daysValue || 180))),
+    enabled: String(enabledValue) !== "false",
+    boardCount: Number(boardRow?.count || 0),
+    opinionCount: Number(opinionRow?.count || 0),
+  };
+}
+
+async function cleanupDSafetyOlderThan(env, days) {
+  const safeDays = Math.min(730, Math.max(30, Number(days || 180)));
+  const cutoff = new Date(Date.now() - safeDays * 86400000).toISOString();
+  const countRow = await env.DB.prepare("SELECT COUNT(*) AS count FROM d_safety_boards WHERE created_at < ?").bind(cutoff).first();
+  const deleted = Number(countRow?.count || 0);
+  if (!deleted) return { deleted: 0, cutoff, days: safeDays };
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM d_safety_opinions WHERE board_id IN (SELECT id FROM d_safety_boards WHERE created_at < ?)").bind(cutoff),
+    env.DB.prepare("DELETE FROM d_safety_boards WHERE created_at < ?").bind(cutoff),
+  ]);
+  return { deleted, cutoff, days: safeDays };
 }
 
 function exactArrayBuffer(value) {
@@ -1751,6 +1785,7 @@ async function serveMsdsPdf(request, env, id) {
 function mapDSafetyBoard(row) {
   return {
     id: row.id,
+    site: row.site || String(row.location || "").split("/")[0].trim() || "미지정",
     meetingDate: row.meeting_date || "",
     workTime: row.work_time || "",
     location: row.location || "",
@@ -1948,18 +1983,50 @@ async function handleApi(request, env, ctx) {
   }
 
   if (path === "/api/d-safety/boards" && method === "GET") {
-    const result = await env.DB.prepare("SELECT * FROM d_safety_boards ORDER BY created_at DESC LIMIT 100").all();
+    const result = await env.DB.prepare("SELECT * FROM d_safety_boards ORDER BY created_at DESC LIMIT 1000").all();
     return json({ ok: true, data: (result.results || []).map(mapDSafetyBoard) });
   }
   if (path === "/api/d-safety/boards" && method === "POST") {
     if (!isAdmin) return error("D-안전회의 등록은 관리자 권한이 필요합니다.", 403);
     const body = await readJson(request);
+    const site = String(body.site || "").trim().slice(0,80);
+    if (!site) return error("사업장을 입력해주세요.");
     const id = randomId("dsafety");
     const created = nowIso();
     const rows = Array.isArray(body.rows) ? body.rows.slice(0, 100).map((row) => ({ no: String(row.no || "-"), risk: String(row.risk || "").slice(0, 2500), action: String(row.action || "").slice(0, 2500) })) : [];
-    await env.DB.prepare(`INSERT INTO d_safety_boards (id,meeting_date,work_time,location,job_name,people_count,contractor,work_manager,contractor_manager,monitor_name,monitor_dept,cctv,rows_json,raw_text,created_by,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'admin',?,?)`)
-      .bind(id, String(body.meetingDate || "").slice(0,40), String(body.workTime || "").slice(0,80), String(body.location || "").slice(0,240), String(body.jobName || "").slice(0,800), Math.max(0, Number(body.peopleCount || 0)), String(body.contractor || "").slice(0,160), String(body.workManager || "").slice(0,100), String(body.contractorManager || "").slice(0,100), String(body.monitorName || "").slice(0,100), String(body.monitorDept || "").slice(0,120), String(body.cctv || "").slice(0,60), JSON.stringify(rows), String(body.rawText || "").slice(0,20000), created, created).run();
+    await env.DB.prepare(`INSERT INTO d_safety_boards (id,site,meeting_date,work_time,location,job_name,people_count,contractor,work_manager,contractor_manager,monitor_name,monitor_dept,cctv,rows_json,raw_text,created_by,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'admin',?,?)`)
+      .bind(id, site, String(body.meetingDate || "").slice(0,40), String(body.workTime || "").slice(0,80), String(body.location || "").slice(0,240), String(body.jobName || "").slice(0,800), Math.max(0, Number(body.peopleCount || 0)), String(body.contractor || "").slice(0,160), String(body.workManager || "").slice(0,100), String(body.contractorManager || "").slice(0,100), String(body.monitorName || "").slice(0,100), String(body.monitorDept || "").slice(0,120), String(body.cctv || "").slice(0,60), JSON.stringify(rows), String(body.rawText || "").slice(0,20000), created, created).run();
     return json({ ok: true, data: await getDSafetyBoard(env, id) }, 201);
+  }
+  if (path === "/api/d-safety/retention" && method === "GET") {
+    if (!isAdmin) return error("D-안전회의 보관설정은 관리자 권한이 필요합니다.", 403);
+    return json({ ok: true, data: await getDSafetyRetentionSettings(env) });
+  }
+  if (path === "/api/d-safety/retention" && method === "PUT") {
+    if (!isAdmin) return error("D-안전회의 보관설정은 관리자 권한이 필요합니다.", 403);
+    const body = await readJson(request);
+    const days = Math.min(730, Math.max(30, Number(body.days || 180)));
+    const enabled = body.enabled !== false;
+    await Promise.all([writeSetting(env, "d_safety_retention_days", days), writeSetting(env, "d_safety_auto_cleanup", enabled ? "true" : "false")]);
+    return json({ ok: true, data: await getDSafetyRetentionSettings(env) });
+  }
+  if (path === "/api/d-safety/cleanup" && method === "POST") {
+    if (!isAdmin) return error("D-안전회의 데이터 정리는 관리자 권한이 필요합니다.", 403);
+    const body = await readJson(request);
+    const settings = await getDSafetyRetentionSettings(env);
+    return json({ ok: true, data: await cleanupDSafetyOlderThan(env, body.days || settings.days) });
+  }
+  if (path === "/api/d-safety/export" && method === "GET") {
+    if (!isAdmin) return error("D-안전회의 백업은 관리자 권한이 필요합니다.", 403);
+    const boardsResult = await env.DB.prepare("SELECT * FROM d_safety_boards ORDER BY created_at DESC LIMIT 3000").all();
+    const opinionsResult = await env.DB.prepare("SELECT * FROM d_safety_opinions ORDER BY created_at DESC LIMIT 10000").all();
+    const opinionsByBoard = new Map();
+    for (const item of opinionsResult.results || []) {
+      if (!opinionsByBoard.has(item.board_id)) opinionsByBoard.set(item.board_id, []);
+      opinionsByBoard.get(item.board_id).push({ id: item.id, boardId: item.board_id, affiliation: item.affiliation || "", name: item.author_name || "", content: item.content || "", createdAt: item.created_at });
+    }
+    const boards = (boardsResult.results || []).map((row) => ({ ...mapDSafetyBoard(row), opinions: opinionsByBoard.get(row.id) || [] }));
+    return json({ ok: true, data: { exportedAt: nowIso(), version: "6.14.0", boards } });
   }
   const dSafetyBoardMatch = path.match(/^\/api\/d-safety\/boards\/([^/]+)$/);
   if (dSafetyBoardMatch && method === "GET") {
@@ -2486,6 +2553,11 @@ export default {
       if (settings.enabled) {
         const result = await cleanupEventsOlderThan(env, settings.days);
         console.log(`POSEIDON event retention cleanup: ${result.deleted} deleted, ${settings.days} days retained`);
+      }
+      const dSafetySettings = await getDSafetyRetentionSettings(env);
+      if (dSafetySettings.enabled) {
+        const result = await cleanupDSafetyOlderThan(env, dSafetySettings.days);
+        console.log(`POSEIDON D-safety retention cleanup: ${result.deleted} deleted, ${dSafetySettings.days} days retained`);
       }
     })());
   },

@@ -1247,3 +1247,39 @@ button, .top-action, .icon-button, .table-action { min-height: 42px; }
   .emergency-chart-toolbar{width:100%}
   .emergency-chart-toolbar>*{flex:1 1 42%}
 }
+
+
+/* === V6.14 emergency polish + site/date D-safety archive === */
+.emergency-warning{align-items:center}
+.emergency-warning-copy{display:grid;gap:5px;min-width:0;line-height:1.65}
+.emergency-warning-copy b{display:block;color:#fff}
+.emergency-warning-copy span{display:block;color:#c6d5dc}
+.emergency-contact-item a{display:flex;align-items:center;justify-content:center;min-height:56px}
+.emergency-contact-item a strong{display:block;line-height:1.15}
+.emergency-chart-upload .file-button,.emergency-chart-toolbar .secondary-button,.emergency-chart-toolbar .emergency-chart-save{display:inline-flex;align-items:center;justify-content:center;text-align:center;min-height:54px;line-height:1.2}
+.emergency-chart-save{text-decoration:none}
+.dsafety-import-inputs{display:grid;gap:10px;min-width:0}
+.dsafety-site-input{display:grid;gap:7px;color:var(--muted);font-size:12px}
+.dsafety-site-input input,.dsafety-selector-panel input[type="date"],.dsafety-selector-panel select,.dsafety-management-panel select{width:100%;min-height:46px;border:1px solid var(--line);border-radius:12px;background:#081723;color:var(--text);padding:0 13px;outline:none;font:inherit}
+.dsafety-site-input input:focus,.dsafety-selector-panel input[type="date"]:focus,.dsafety-selector-panel select:focus,.dsafety-management-panel select:focus{border-color:var(--cyan);box-shadow:0 0 0 3px rgba(89,224,220,.10)}
+.dsafety-management-panel{display:grid;grid-template-columns:minmax(280px,1.4fr) minmax(220px,.7fr) minmax(160px,.45fr);gap:14px;align-items:end;margin-bottom:18px}
+.dsafety-management-panel>div:first-child{align-self:center}.dsafety-management-panel>div:first-child p:not(.eyebrow){margin:.3rem 0 0;color:#8faab5;line-height:1.6}
+.dsafety-management-panel>label:not(.switch-row){display:grid;gap:7px;color:var(--muted);font-size:12px}
+.dsafety-management-actions{grid-column:1/-1;display:flex;gap:9px;flex-wrap:wrap}
+.dsafety-management-panel>small{grid-column:1/-1;color:#88a4af}
+.dsafety-selector-panel{display:block!important}
+.dsafety-site-tabs{display:flex;gap:8px;overflow-x:auto;padding:2px 0 12px;scrollbar-width:thin}
+.dsafety-site-tabs button{flex:0 0 auto;min-height:40px;border:1px solid rgba(74,194,214,.25);border-radius:999px;background:rgba(6,27,40,.75);color:#9db8c2;padding:0 16px;font:inherit;font-weight:800;cursor:pointer}
+.dsafety-site-tabs button.active{border-color:#55e0ec;background:rgba(40,205,222,.14);color:#7cf4f7;box-shadow:0 0 0 2px rgba(77,225,239,.06) inset}
+.dsafety-filter-row{display:grid;grid-template-columns:minmax(170px,.35fr) minmax(300px,1fr) auto auto;gap:10px;align-items:end}
+.dsafety-filter-row label{display:grid;gap:7px;color:var(--muted);font-size:12px;min-width:0}
+.dsafety-board-site{display:inline-flex!important;align-items:center;justify-content:center;border:1px solid rgba(64,215,231,.3);border-radius:999px;padding:6px 12px;color:#65e7f0!important;font-weight:900;background:rgba(35,201,218,.07)}
+.dsafety-opinion-panel>p{line-height:1.65;color:#9bb2bc}
+.dsafety-opinion-panel>label{display:grid;gap:8px;width:100%;margin-top:14px;color:var(--muted);font-size:12px}
+.dsafety-opinion-panel>label textarea{display:block;width:100%;min-height:132px;padding:13px 14px;resize:vertical;color:var(--text);background:#081723;border:1px solid var(--line);border-radius:12px;outline:none;font:inherit;line-height:1.6}
+.dsafety-opinion-panel>label textarea:focus{border-color:var(--cyan);box-shadow:0 0 0 3px rgba(89,224,220,.10)}
+.dsafety-opinion-panel #submitDSafetyOpinion{margin-top:12px;min-height:48px;display:inline-flex;align-items:center;justify-content:center}
+@media(max-width:1000px){.dsafety-management-panel{grid-template-columns:1fr 1fr}.dsafety-management-panel>div:first-child{grid-column:1/-1}.dsafety-filter-row{grid-template-columns:1fr 1fr}.dsafety-filter-row button{width:100%}}
+@media(max-width:700px){.emergency-warning{align-items:flex-start}.emergency-warning-copy{gap:8px}.dsafety-import-inputs{grid-column:1}.dsafety-management-panel{grid-template-columns:1fr}.dsafety-management-panel>div:first-child{grid-column:auto}.dsafety-management-actions,.dsafety-management-panel>small{grid-column:auto}.dsafety-management-actions>*{flex:1 1 100%}.dsafety-filter-row{grid-template-columns:1fr}.dsafety-site-tabs{margin-right:-6px}.dsafety-opinion-panel>label textarea{min-height:150px}}
+.dsafety-board-title>div:last-child{display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:wrap}
+.dsafety-board-title>div:last-child>span:not(.dsafety-board-site){display:inline-flex;align-items:center;justify-content:center;border:1px solid rgba(64,215,231,.3);border-radius:999px;padding:6px 12px;color:#65e7f0;font-weight:900}
