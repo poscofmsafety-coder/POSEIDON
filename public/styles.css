@@ -1337,3 +1337,90 @@ button, .top-action, .icon-button, .table-action { min-height: 42px; }
   .dsafety-risk-table th:first-child,.dsafety-risk-table td:first-child{width:64px;min-width:64px;max-width:64px}
   .dsafety-risk-table{min-width:760px}
 }
+
+
+/* POSEIDON V6.17 — navigation cleanup, senior-readable typography, D-Safety layout */
+body { font-size: 16px; }
+.nav-item { font-size: 16px; min-height: 52px; }
+.eyebrow { font-size: 12px; }
+.system-chip, .role-badge, .top-action, .guard-status-pill, .browser-edge-badge, .radio-indicator { font-size: 13px; }
+.clock { font-size: 13px; }
+.panel-header h3 { font-size: 21px; }
+.feature-card p, .event-retention-panel p { font-size: 13px; }
+.data-table th, .data-table td { font-size: 13.5px; }
+.home-top-button span { font-size: 21px; line-height: 1; }
+
+.dsafety-board-card { padding: 18px; }
+.dsafety-info-grid-v3 { display:grid; grid-template-columns:minmax(150px, .7fr) minmax(170px, .8fr) minmax(0, 3.5fr); gap:12px; margin:18px 0 12px; }
+.dsafety-info-grid-v3>div,
+.dsafety-role-grid>div { border:1px solid rgba(73,181,202,.18); border-radius:14px; padding:14px 16px; background:rgba(4,22,34,.72); min-width:0; }
+.dsafety-info-grid-v3 span,
+.dsafety-role-grid span { display:block; color:#93afb9; font-size:14px; font-weight:800; }
+.dsafety-info-grid-v3 b,
+.dsafety-role-grid b { display:block; margin-top:7px; color:#f2fbfb; font-size:17px; line-height:1.5; }
+.dsafety-meta-job b { font-size:17px; }
+.dsafety-job-line { display:block; padding:2px 0; line-height:1.55; word-break:keep-all; overflow-wrap:break-word; }
+.dsafety-job-line + .dsafety-job-line { margin-top:3px; }
+.dsafety-job-tail { display:inline; white-space:nowrap; }
+.dsafety-role-grid { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:12px; margin:0 0 18px; }
+.dsafety-role-grid .dsafety-meta-monitor { border-color:rgba(83,226,239,.34); background:linear-gradient(135deg,rgba(18,91,107,.18),rgba(4,22,34,.74)); }
+.dsafety-role-grid .dsafety-meta-monitor span { color:#70eaf2; }
+.dsafety-role-grid .dsafety-meta-people { border-color:rgba(255,209,102,.28); background:linear-gradient(135deg,rgba(96,72,11,.15),rgba(4,22,34,.74)); }
+.dsafety-role-grid .dsafety-meta-people span { color:#f1d98c; }
+.dsafety-board-title h3 { font-size:22px; line-height:1.45; }
+.dsafety-risk-table th, .dsafety-risk-table td { font-size:14px; line-height:1.7; }
+
+.dsafety-opinion-panel { padding:20px; }
+.dsafety-opinion-panel>p { font-size:15px; }
+.dsafety-opinion-form { display:grid; gap:14px; margin-top:16px; }
+.dsafety-opinion-form label,
+.dsafety-opinion-grid label,
+.dsafety-opinion-job-field,
+.dsafety-opinion-content-field { display:grid; gap:8px; width:100%; margin:0; min-width:0; color:var(--muted); }
+.dsafety-opinion-form label>span,
+.dsafety-opinion-grid label>span { display:block; color:#c4d7dc; font-size:14px; font-weight:850; line-height:1.4; }
+.dsafety-opinion-form input,
+.dsafety-opinion-form select,
+.dsafety-opinion-form textarea { width:100%; font-size:16px; }
+.dsafety-opinion-job-field select { min-height:52px; }
+.dsafety-opinion-grid { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:14px; }
+.dsafety-opinion-content-field textarea { display:block; min-height:145px; padding:14px 15px; resize:vertical; color:var(--text); background:#081723; border:1px solid var(--line); border-radius:12px; outline:none; font:inherit; font-size:16px; line-height:1.65; }
+.dsafety-opinion-content-field textarea:focus { border-color:var(--cyan); box-shadow:0 0 0 3px rgba(89,224,220,.10); }
+.dsafety-opinion-form #submitDSafetyOpinion { justify-self:start; min-height:50px; margin-top:0; font-size:16px; }
+
+.dsafety-opinion-list { gap:12px; }
+.dsafety-opinion-item { padding:16px; }
+.dsafety-opinion-job-block { display:grid; gap:6px; padding-bottom:13px; margin-bottom:13px; border-bottom:1px solid rgba(90,185,205,.15); }
+.dsafety-opinion-job-block>span,
+.dsafety-opinion-meta span,
+.dsafety-opinion-content>span { color:#8faeb8; font-size:13px; font-weight:850; }
+.dsafety-opinion-job-block b { color:#73eaf0; font-size:16px; line-height:1.55; }
+.dsafety-opinion-meta { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+.dsafety-opinion-meta>div { display:grid; gap:5px; min-width:0; }
+.dsafety-opinion-meta b { font-size:16px; color:#f1fafa; }
+.dsafety-opinion-content { display:grid; gap:5px; margin-top:13px; }
+.dsafety-opinion-content p { margin:0; font-size:16px; line-height:1.7; white-space:pre-wrap; }
+.dsafety-opinion-item>time { display:block; margin-top:11px; color:#7897a2; font-size:12px; text-align:right; }
+
+@media (max-width: 1120px) {
+  .dsafety-role-grid { grid-template-columns:repeat(3,minmax(0,1fr)); }
+  .dsafety-role-grid>div:nth-child(4), .dsafety-role-grid>div:nth-child(5) { grid-column:auto; }
+}
+@media (max-width: 820px) {
+  .dsafety-info-grid-v3 { grid-template-columns:1fr 1fr; }
+  .dsafety-info-grid-v3 .dsafety-meta-job { grid-column:1/-1; }
+  .dsafety-role-grid { grid-template-columns:1fr 1fr; }
+  .dsafety-board-title h3 { font-size:20px; }
+  .data-table th, .data-table td, .dsafety-risk-table th, .dsafety-risk-table td { font-size:14px; }
+}
+@media (max-width: 620px) {
+  .dsafety-info-grid-v3, .dsafety-role-grid, .dsafety-opinion-grid, .dsafety-opinion-meta { grid-template-columns:1fr; }
+  .dsafety-opinion-panel { padding:16px; }
+  .dsafety-info-grid-v3 span, .dsafety-role-grid span, .dsafety-opinion-form label>span, .dsafety-opinion-grid label>span { font-size:14px; }
+  .dsafety-info-grid-v3 b, .dsafety-role-grid b, .dsafety-opinion-form input, .dsafety-opinion-form select, .dsafety-opinion-form textarea { font-size:16px; }
+}
+/* V6.17 specificity guard: override legacy direct-child flex rules in opinion cards */
+.dsafety-opinion-item>.dsafety-opinion-job-block { display:grid; justify-content:stretch; gap:6px; }
+.dsafety-opinion-item>.dsafety-opinion-meta { display:grid; grid-template-columns:1fr 1fr; justify-content:stretch; gap:10px; }
+.dsafety-opinion-item>.dsafety-opinion-content { display:grid; justify-content:stretch; gap:5px; }
+@media (max-width:620px){.dsafety-opinion-item>.dsafety-opinion-meta{grid-template-columns:1fr}}

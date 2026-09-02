@@ -1,4 +1,4 @@
-const POSEIDON_BUILD = "6.16.0";
+const POSEIDON_BUILD = "6.17.0";
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -11,9 +11,6 @@ const pageTitles = {
   devices: "장치 관리",
   zones: "위험구역 설정",
   ppe: "근로자 보호구",
-  behavior: "불안전 행동",
-  environment: "작업환경",
-  equipment: "중장비",
   law: "스마트 안전보건법령",
   msds: "스마트 MSDS",
   emergency: "119 신고",
@@ -31,24 +28,6 @@ const ruleGroups = {
     ["mask", "마스크", "마스크 착용·미착용·판정불가 상태를 감지합니다.", true],
     ["harness", "안전대", "안전대 미착용 의심 상태를 확인합니다.", false],
     ["hookConnected", "안전대 후크 체결", "현장 전용 학습모델 연결을 위한 확장 규칙입니다.", false],
-  ],
-  behavior: [
-    ["dangerZone", "위험구역 진입", "작업자의 발 위치가 설정 구역 안으로 들어오면 경고합니다.", true],
-    ["fall", "넘어짐 의심", "넘어짐 객체가 반복 감지되면 관리자 확인을 요청합니다.", true],
-    ["unsafePosture", "불안전 자세", "작업 자세 이상을 확인하는 확장 규칙입니다.", false],
-    ["longStay", "위험구역 장시간 체류", "지정 시간 이상 체류한 작업자를 경고합니다.", false],
-  ],
-  environment: [
-    ["obstacle", "통로 장애물", "통로 내 장애물·적치물을 확인하는 확장 규칙입니다.", false],
-    ["blockedAisle", "안전통로 점유", "안전통로 침범 상태를 확인합니다.", false],
-    ["smoke", "연기", "연기 발생 의심 장면을 관리자에게 알립니다.", false],
-    ["fire", "화재", "화염 의심 장면을 관리자에게 알립니다.", false],
-  ],
-  equipment: [
-    ["forklift", "지게차", "지게차 접근 시 ‘지게차가 지나갑니다’ 음성 경고를 제공합니다.", false],
-    ["heavyEquipmentProximity", "중장비 근접", "작업자와 중장비의 안전거리 이탈을 확인합니다.", false],
-    ["crane", "크레인·인양물", "인양반경 내 작업자 접근을 확인하는 확장 규칙입니다.", false],
-    ["agv", "AGV·운반차", "무인운반차 동선과 작업자 접근을 확인합니다.", false],
   ],
 };
 
@@ -68,7 +47,7 @@ const defaultConfig = () => ({
     mask: true,
     harness: false,
     hookConnected: false,
-    fall: true,
+    fall: false,
     unsafePosture: false,
     longStay: false,
     forklift: false,
@@ -91,7 +70,7 @@ const defaultConfig = () => ({
       harness: true,
       hookConnected: true,
       dangerZone: true,
-      fall: true,
+      fall: false,
       unsafePosture: true,
       longStay: true,
       forklift: true,
@@ -380,7 +359,7 @@ function goToPage(page) {
   if (state.session?.role === "admin") {
     syncAdminWatchRequests();
     if (page === "zones") prepareZoneEditor();
-    if (["ppe", "behavior", "environment", "equipment"].includes(page)) loadRuleEditor(page);
+    if (page === "ppe") loadRuleEditor(page);
     if (page === "reports") renderReports();
     if (page === "events") loadEventRetentionSettings();
   }
@@ -1835,7 +1814,6 @@ function processGuardDetections(message) {
   const rules = guard.config.rules || {};
   const violations = [];
   const noHarness = detections.filter((item) => item.label === "No_Harness");
-  const falls = detections.filter((item) => item.label === "Fall-Detected");
   const zonePeople = assessments.map((item) => item.anchor);
   const zoneEntries = isGuardZoneActive()
     ? detectZoneEntries(zonePeople, message.sourceWidth, message.sourceHeight)
@@ -1895,7 +1873,6 @@ function processGuardDetections(message) {
   }
 
   if (rules.harness && noHarness.length) violations.push(["harness", { type: "HARNESS_NOT_DETECTED", category: "보호구", severity: "high", message: "안전대 미착용 의심 상황이 감지되었습니다.", voice: "안전대를 착용해주세요.", voiceKey: "harness", metadata: { count: noHarness.length } }]);
-  if (rules.fall !== false && falls.length) violations.push(["fall", { type: "FALL_CANDIDATE", category: "불안전 행동", severity: "critical", message: "넘어짐 의심 상황이 감지되었습니다.", voice: "넘어짐 위험이 감지되었습니다. 확인해주세요.", voiceKey: "fall", metadata: { count: falls.length } }]);
   if (zoneEntries.length) violations.push(["zone", { type: "DANGER_ZONE_ENTRY", category: "위험구역", severity: "high", message: `${zoneEntries[0].zone.name}에 작업자가 진입했습니다.`, voice: "위험구역입니다. 즉시 이동해주세요.", voiceKey: "dangerZone", metadata: { count: zoneEntries.length, zone: zoneEntries[0].zone.name } }]);
 
   const presentKeys = new Set(violations.map(([key]) => key));
@@ -2995,9 +2972,7 @@ function speak(text) {
 async function runGuardTest(kind) {
   const map = {
     helmet: { type: "HELMET_NOT_DETECTED", category: "보호구", severity: "high", message: "안전모 미착용 의심 상황이 감지되었습니다.", voice: "안전모를 착용해주세요." },
-    forklift: { type: "FORKLIFT_APPROACH", category: "중장비", severity: "high", message: "지게차 접근 경고를 시연했습니다.", voice: "지게차가 지나갑니다. 주의하세요." },
     zone: { type: "DANGER_ZONE_ENTRY", category: "위험구역", severity: "high", message: "위험구역 진입 경고를 시연했습니다.", voice: "위험구역입니다. 즉시 이동해주세요." },
-    fall: { type: "FALL_CANDIDATE", category: "불안전 행동", severity: "critical", message: "넘어짐 의심 경고를 시연했습니다.", voice: "넘어짐 위험이 감지되었습니다. 확인해주세요." },
   };
   if (!guard.active) return toast("먼저 지킴이를 시작해주세요.");
   await triggerGuardEvent(map[kind]);
@@ -4178,6 +4153,20 @@ function renderDSafetyOpinionJobs(board) {
   else if (jobs[0]) select.value = jobs[0];
 }
 
+function formatDSafetyJobLine(job) {
+  const value = String(job || "").replace(/\s+/g, " ").trim();
+  if (!value) return "-";
+  const tail = value.match(/^(.*?)(\s+\([^()]+\))$/);
+  if (!tail) return escapeHtml(value);
+  return `${escapeHtml(tail[1].trim())}<span class="dsafety-job-tail">&nbsp;${escapeHtml(tail[2].trim())}</span>`;
+}
+
+function renderDSafetyJobLines(jobName) {
+  const jobs = splitDSafetyJobs(jobName);
+  const values = jobs.length ? jobs : [String(jobName || "-").trim() || "-"];
+  return values.map((job) => `<span class="dsafety-job-line">${formatDSafetyJobLine(job)}</span>`).join("");
+}
+
 function renderDSafetyBoard(board) {
   const viewer = $("#dSafetyViewer");
   if (!viewer) return;
@@ -4191,7 +4180,7 @@ function renderDSafetyBoard(board) {
   const rows = normalizeDSafetyRows(board.rows);
   const site = dSafetySiteOf(board);
   const monitor = [board.monitorName, board.monitorDept ? `(${board.monitorDept})` : ""].filter(Boolean).join(" ") || "-";
-  viewer.innerHTML = `<section class="panel dsafety-board-card"><div class="dsafety-board-title"><div><p class="eyebrow">D-SAFETY COMMUNICATION BOARD</p><h3>${escapeHtml(board.meetingDate || "D-안전회의")} · ${escapeHtml(board.location || "작업장")}</h3></div><div><span class="dsafety-board-site">${escapeHtml(site)}</span><span>${escapeHtml(String(board.peopleCount || 0))}명</span></div></div><div class="dsafety-info-grid dsafety-info-grid-v2"><div class="dsafety-meta-site"><span>사업장</span><b>${escapeHtml(site)}</b></div><div class="dsafety-meta-time"><span>작업시간</span><b>${escapeHtml(board.workTime || "-")}</b></div><div class="dsafety-meta-job"><span>작업명</span><b>${escapeHtml(board.jobName || "-")}</b></div><div class="dsafety-meta-monitor"><span>안전Monitoring 요원</span><b>${escapeHtml(monitor)}</b></div><div class="dsafety-meta-contractor"><span>수행사</span><b>${escapeHtml(board.contractor || "-")}</b></div><div class="dsafety-meta-manager"><span>작업담당자</span><b>${escapeHtml(board.workManager || "-")}</b></div><div class="dsafety-meta-contractor-manager"><span>수행사 담당자</span><b>${escapeHtml(board.contractorManager || "-")}</b></div></div><div class="dsafety-risk-table-wrap"><table class="data-table dsafety-risk-table"><thead><tr><th>No.</th><th>⚠ 잠재위험</th><th>✓ 안전 조치사항</th></tr></thead><tbody>${rows.map((row) => `<tr><td>${escapeHtml(row.no)}</td><td>${escapeHtml(row.risk)}</td><td>${escapeHtml(row.action)}</td></tr>`).join("") || `<tr><td colspan="3">등록된 위험요인이 없습니다.</td></tr>`}</tbody></table></div></section>`;
+  viewer.innerHTML = `<section class="panel dsafety-board-card"><div class="dsafety-board-title"><div><p class="eyebrow">D-SAFETY COMMUNICATION BOARD</p><h3>${escapeHtml(board.meetingDate || "D-안전회의")} · ${escapeHtml(board.location || "작업장")}</h3></div><div><span class="dsafety-board-site">${escapeHtml(site)}</span></div></div><div class="dsafety-info-grid dsafety-info-grid-v3"><div class="dsafety-meta-site"><span>사업장</span><b>${escapeHtml(site)}</b></div><div class="dsafety-meta-time"><span>작업시간</span><b>${escapeHtml(board.workTime || "-")}</b></div><div class="dsafety-meta-job"><span>작업명</span><b>${renderDSafetyJobLines(board.jobName)}</b></div></div><div class="dsafety-role-grid"><div class="dsafety-meta-manager"><span>작업담당자</span><b>${escapeHtml(board.workManager || "-")}</b></div><div class="dsafety-meta-monitor"><span>안전Monitoring 요원</span><b>${escapeHtml(monitor)}</b></div><div class="dsafety-meta-contractor"><span>수행사</span><b>${escapeHtml(board.contractor || "-")}</b></div><div class="dsafety-meta-contractor-manager"><span>수행사 담당자</span><b>${escapeHtml(board.contractorManager || "-")}</b></div><div class="dsafety-meta-people"><span>작업인원</span><b>${escapeHtml(String(board.peopleCount || 0))}명</b></div></div><div class="dsafety-risk-table-wrap"><table class="data-table dsafety-risk-table"><thead><tr><th>No.</th><th>⚠ 잠재위험</th><th>✓ 안전 조치사항</th></tr></thead><tbody>${rows.map((row) => `<tr><td>${escapeHtml(row.no)}</td><td>${escapeHtml(row.risk)}</td><td>${escapeHtml(row.action)}</td></tr>`).join("") || `<tr><td colspan="3">등록된 위험요인이 없습니다.</td></tr>`}</tbody></table></div></section>`;
   renderDSafetyOpinionJobs(board);
   renderDSafetyOpinions(board.opinions || []);
 }
@@ -4199,7 +4188,7 @@ function renderDSafetyBoard(board) {
 function renderDSafetyOpinions(opinions = []) {
   const list = $("#dSafetyOpinionList");
   if (!list) return;
-  list.innerHTML = opinions.length ? `<div class="divider-label">접수된 종사자 의견 ${opinions.length}건</div>${opinions.map((item) => `<article class="dsafety-opinion-item"><div><b>${escapeHtml(item.name)} · ${escapeHtml(item.affiliation)}</b><time>${formatDate(item.createdAt)}</time></div>${item.jobName ? `<span class="dsafety-opinion-job">작업 · ${escapeHtml(item.jobName)}</span>` : ""}<p>${escapeHtml(item.content)}</p></article>`).join("")}` : `<div class="dsafety-opinion-empty">아직 등록된 종사자 의견이 없습니다.</div>`;
+  list.innerHTML = opinions.length ? `<div class="divider-label">접수된 종사자 의견 ${opinions.length}건</div>${opinions.map((item) => `<article class="dsafety-opinion-item">${item.jobName ? `<div class="dsafety-opinion-job-block"><span>작업명</span><b>${formatDSafetyJobLine(item.jobName)}</b></div>` : ""}<div class="dsafety-opinion-meta"><div><span>소속</span><b>${escapeHtml(item.affiliation)}</b></div><div><span>이름</span><b>${escapeHtml(item.name)}</b></div></div><div class="dsafety-opinion-content"><span>의견</span><p>${escapeHtml(item.content)}</p></div><time>${formatDate(item.createdAt)}</time></article>`).join("")}` : `<div class="dsafety-opinion-empty">아직 등록된 종사자 의견이 없습니다.</div>`;
 }
 
 function renderDSafetySelect(resetSelection = false) {
@@ -4592,6 +4581,7 @@ function bindEvents() {
   $("#loginForm").addEventListener("submit", login);
   $$('[data-login-role]').forEach((button) => button.addEventListener("click", () => setLoginRole(button.dataset.loginRole)));
   $("#logoutButton").addEventListener("click", logout);
+  $("#homeTopButton")?.addEventListener("click", () => goToPage("overview"));
   $$(".nav-item").forEach((button) => button.addEventListener("click", () => goToPage(button.dataset.page)));
   $("#lawSearchForm")?.addEventListener("submit", (event) => { event.preventDefault(); searchSafetyLaw($("#lawSearchInput")?.value, { navigate: false }); });
   $("#adminLawQuickForm")?.addEventListener("submit", (event) => { event.preventDefault(); submitQuickLawSearch("#adminLawQuickInput"); });
