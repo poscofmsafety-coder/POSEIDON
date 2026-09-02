@@ -118,6 +118,7 @@ const SCHEMA = [
     board_id TEXT NOT NULL,
     affiliation TEXT NOT NULL DEFAULT '',
     author_name TEXT NOT NULL DEFAULT '',
+    job_name TEXT NOT NULL DEFAULT '',
     content TEXT NOT NULL,
     created_at TEXT NOT NULL
   )`,
@@ -230,6 +231,9 @@ async function ensureSchema(env) {
       const dsColumns = await env.DB.prepare("PRAGMA table_info(d_safety_boards)").all();
       const names = new Set((dsColumns.results || []).map((row) => String(row.name || "")));
       if (!names.has("site")) await env.DB.prepare("ALTER TABLE d_safety_boards ADD COLUMN site TEXT NOT NULL DEFAULT ''").run();
+      const opinionColumns = await env.DB.prepare("PRAGMA table_info(d_safety_opinions)").all();
+      const opinionNames = new Set((opinionColumns.results || []).map((row) => String(row.name || "")));
+      if (!opinionNames.has("job_name")) await env.DB.prepare("ALTER TABLE d_safety_opinions ADD COLUMN job_name TEXT NOT NULL DEFAULT ''").run();
       await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_dsafety_site_created ON d_safety_boards(site, created_at DESC)").run();
       schemaReady = true;
     })().catch((err) => { schemaPromise = null; throw err; });
@@ -1807,7 +1811,7 @@ async function getDSafetyBoard(env, id) {
   const row = await env.DB.prepare("SELECT * FROM d_safety_boards WHERE id=?").bind(id).first();
   if (!row) return null;
   const opinions = await env.DB.prepare("SELECT * FROM d_safety_opinions WHERE board_id=? ORDER BY created_at DESC LIMIT 200").bind(id).all();
-  return { ...mapDSafetyBoard(row), opinions: (opinions.results || []).map((item) => ({ id: item.id, boardId: item.board_id, affiliation: item.affiliation || "", name: item.author_name || "", content: item.content || "", createdAt: item.created_at })) };
+  return { ...mapDSafetyBoard(row), opinions: (opinions.results || []).map((item) => ({ id: item.id, boardId: item.board_id, affiliation: item.affiliation || "", name: item.author_name || "", jobName: item.job_name || "", content: item.content || "", createdAt: item.created_at })) };
 }
 
 /* ---------- API ---------- */
@@ -2031,10 +2035,10 @@ async function handleApi(request, env, ctx) {
     const opinionsByBoard = new Map();
     for (const item of opinionsResult.results || []) {
       if (!opinionsByBoard.has(item.board_id)) opinionsByBoard.set(item.board_id, []);
-      opinionsByBoard.get(item.board_id).push({ id: item.id, boardId: item.board_id, affiliation: item.affiliation || "", name: item.author_name || "", content: item.content || "", createdAt: item.created_at });
+      opinionsByBoard.get(item.board_id).push({ id: item.id, boardId: item.board_id, affiliation: item.affiliation || "", name: item.author_name || "", jobName: item.job_name || "", content: item.content || "", createdAt: item.created_at });
     }
     const boards = (boardsResult.results || []).map((row) => ({ ...mapDSafetyBoard(row), opinions: opinionsByBoard.get(row.id) || [] }));
-    return json({ ok: true, data: { exportedAt: nowIso(), version: "6.15.0", boards } });
+    return json({ ok: true, data: { exportedAt: nowIso(), version: "6.16.0", boards } });
   }
   const dSafetyBoardMatch = path.match(/^\/api\/d-safety\/boards\/([^/]+)$/);
   if (dSafetyBoardMatch && method === "GET") {
@@ -2051,17 +2055,18 @@ async function handleApi(request, env, ctx) {
   const dSafetyOpinionMatch = path.match(/^\/api\/d-safety\/boards\/([^/]+)\/opinions$/);
   if (dSafetyOpinionMatch && method === "POST") {
     const boardId = decodeURIComponent(dSafetyOpinionMatch[1]);
-    const exists = await env.DB.prepare("SELECT id FROM d_safety_boards WHERE id=?").bind(boardId).first();
+    const exists = await env.DB.prepare("SELECT id,job_name FROM d_safety_boards WHERE id=?").bind(boardId).first();
     if (!exists) return error("D-안전회의 자료를 찾을 수 없습니다.", 404);
     const body = await readJson(request);
     const affiliation = String(body.affiliation || "").trim().slice(0, 100);
     const authorName = String(body.name || "").trim().slice(0, 80);
+    const jobName = String(body.jobName || "").trim().slice(0, 800);
     const content = String(body.content || "").trim().slice(0, 1200);
     if (!affiliation || !authorName || !content) return error("소속, 이름, 의견을 모두 입력해주세요.");
     const id = randomId("opinion");
     const createdAt = nowIso();
-    await env.DB.prepare("INSERT INTO d_safety_opinions (id,board_id,affiliation,author_name,content,created_at) VALUES (?,?,?,?,?,?)").bind(id, boardId, affiliation, authorName, content, createdAt).run();
-    return json({ ok: true, data: { id, boardId, affiliation, name: authorName, content, createdAt } }, 201);
+    await env.DB.prepare("INSERT INTO d_safety_opinions (id,board_id,affiliation,author_name,job_name,content,created_at) VALUES (?,?,?,?,?,?,?)").bind(id, boardId, affiliation, authorName, jobName, content, createdAt).run();
+    return json({ ok: true, data: { id, boardId, affiliation, name: authorName, jobName, content, createdAt } }, 201);
   }
 
   if (path === "/api/guard/privacy" && method === "PUT") {

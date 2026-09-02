@@ -1,4 +1,4 @@
-const POSEIDON_BUILD = "6.15.0";
+const POSEIDON_BUILD = "6.16.0";
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -17,7 +17,7 @@ const pageTitles = {
   law: "스마트 안전보건법령",
   msds: "스마트 MSDS",
   emergency: "119 신고",
-  dsafety: "D-안전회의",
+  dsafety: "D-안전소통보드",
   events: "이벤트 센터",
   reports: "리포트",
   settings: "설정",
@@ -4019,20 +4019,100 @@ function findDSafetyDataRow(fullText) {
   return rows[rows.length - 1] || "";
 }
 
+function normalizeDSafetyMarker(value) {
+  const raw = String(value || "").trim().replace(/\.$/, "");
+  if (raw === "*") return "*";
+  const match = raw.match(/^(\d+)(?:-(\d+))?$/);
+  if (!match) return raw || "-";
+  return match[2] ? `${Number(match[1])}-${Number(match[2])}` : String(Number(match[1]));
+}
+
 function splitDSafetyNumbered(text) {
-  if (!text) return [];
-  const items = []; let current = null;
-  for (const line of String(text).split(/\r?\n/)) {
-    const trimmed = line.trim(); if (!trimmed) continue;
-    const m = trimmed.match(/^(\d+(?:-\d+)?)\.\s*(.*)/);
-    const star = trimmed.match(/^\*\s*(.*)/);
-    if (m) { if (current) items.push(current); current = { no: m[1], text: m[2] }; }
-    else if (star) { if (current) items.push(current); current = { no: "*", text: star[1] }; }
-    else if (current) current.text += ` ${trimmed}`;
-    else current = { no: "-", text: trimmed };
+  const source = String(text || "").replace(/\r\n?/g, "\n").trim();
+  if (!source) return [];
+
+  // D-안전회의 원문은 셀 안 줄바꿈이 없어져 "...위험 1-1 굴착기..."처럼
+  // 하위 순번이 문장 중간에 붙는 경우가 있어 줄 시작뿐 아니라 공백 뒤 순번도 인식합니다.
+  // 상위 순번은 "1." 형식, 하위 순번은 "1-1" 또는 "1-1." 형식을 허용합니다.
+  const markerPattern = /(^|[\s])((?:\d{1,2}-\d{1,2})(?:\.)?|\d{1,2}\.|\*)[ \t]+/gm;
+  const matches = [...source.matchAll(markerPattern)];
+  if (!matches.length) return [{ no: "-", text: source.replace(/\s+/g, " ").trim() }];
+
+  const items = [];
+  const leadingText = source.slice(0, matches[0].index).replace(/\s+/g, " ").trim();
+  const firstNo = normalizeDSafetyMarker(matches[0][2]);
+  const parentMatch = firstNo.match(/^(\d+)-\d+$/);
+  if (leadingText && parentMatch) items.push({ no: parentMatch[1], text: leadingText });
+  for (let i = 0; i < matches.length; i += 1) {
+    const match = matches[i];
+    const next = matches[i + 1];
+    const no = normalizeDSafetyMarker(match[2]);
+    const start = match.index + match[0].length;
+    const end = next ? next.index : source.length;
+    const itemText = source.slice(start, end).replace(/\s+/g, " ").trim();
+    if (itemText || no === "*") items.push({ no, text: itemText });
   }
-  if (current) items.push(current);
   return items;
+}
+
+function dSafetyNoSortValue(no) {
+  const normalized = normalizeDSafetyMarker(no);
+  if (normalized === "-") return [-1, -1, 0];
+  if (normalized === "*") return [9999, 9999, 2];
+  const match = normalized.match(/^(\d+)(?:-(\d+))?$/);
+  if (!match) return [9998, 9998, 1];
+  return [Number(match[1]), match[2] ? Number(match[2]) : -1, 0];
+}
+
+function compareDSafetyNo(a, b) {
+  const aa = dSafetyNoSortValue(a), bb = dSafetyNoSortValue(b);
+  for (let i = 0; i < aa.length; i += 1) if (aa[i] !== bb[i]) return aa[i] - bb[i];
+  return String(a).localeCompare(String(b), "ko");
+}
+
+function mergeDSafetyNumbered(risks = [], actions = []) {
+  const collect = (items) => {
+    const map = new Map();
+    for (const item of items) {
+      const no = normalizeDSafetyMarker(item?.no);
+      const text = String(item?.text || "").replace(/\s+/g, " ").trim();
+      if (!map.has(no)) map.set(no, []);
+      if (text && !map.get(no).includes(text)) map.get(no).push(text);
+    }
+    return map;
+  };
+  const riskMap = collect(risks), actionMap = collect(actions);
+  const nos = [...new Set([...riskMap.keys(), ...actionMap.keys()])].sort(compareDSafetyNo);
+  return nos.map((no) => ({ no, risk: (riskMap.get(no) || []).join("\n"), action: (actionMap.get(no) || []).join("\n") }));
+}
+
+function normalizeDSafetyRows(rows = []) {
+  const risks = [], actions = [];
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const no = normalizeDSafetyMarker(row?.no);
+    const prefix = no === "*" ? "* " : (no && no !== "-" ? `${no}. ` : "");
+    if (String(row?.risk || "").trim()) risks.push(...splitDSafetyNumbered(`${prefix}${row.risk}`));
+    if (String(row?.action || "").trim()) actions.push(...splitDSafetyNumbered(`${prefix}${row.action}`));
+  }
+  return mergeDSafetyNumbered(risks, actions);
+}
+
+function splitDSafetyJobs(text) {
+  const source = String(text || "").replace(/\r\n?/g, "\n").trim();
+  if (!source) return [];
+  const markerPattern = /(^|[\s])(\d{1,2}\.)[ \t]+/gm;
+  const matches = [...source.matchAll(markerPattern)];
+  if (!matches.length) return [...new Set(source.split(/\n+/).map((item) => item.trim()).filter(Boolean))];
+  const jobs = [];
+  for (let i = 0; i < matches.length; i += 1) {
+    const match = matches[i], next = matches[i + 1];
+    const no = normalizeDSafetyMarker(match[2]);
+    const start = match.index + match[0].length;
+    const end = next ? next.index : source.length;
+    const value = source.slice(start, end).replace(/\s+/g, " ").trim();
+    if (value) jobs.push(`${no}. ${value}`);
+  }
+  return [...new Set(jobs)];
 }
 
 function parseDSafetyExcel(raw) {
@@ -4041,14 +4121,13 @@ function parseDSafetyExcel(raw) {
   if (f.length < 16) throw new Error("D-안전회의 엑셀 행의 열 수가 부족합니다. 엑셀에서 전체 행을 복사해주세요.");
   const risks = splitDSafetyNumbered(f[14] || "");
   const actions = splitDSafetyNumbered(f[15] || "");
-  const nos = [...new Set([...risks.map((x) => x.no), ...actions.map((x) => x.no)])];
   const plant = (f[4] || "").trim(), place = (f[6] || "").trim();
   return {
     site: plant,
     meetingDate: f[0] || "", workTime: f[9] || "", location: plant && place && plant.replace(/\s+/g, "") !== place.replace(/\s+/g, "") ? `${plant} / ${place}` : (plant || place),
     jobName: f[7] || "", peopleCount: parseInt(f[8], 10) || 1, contractor: f[10] || "", workManager: f[12] || "", contractorManager: f[13] || "",
     monitorDept: (f[f.length - 3] || "").trim(), monitorName: (f[f.length - 2] || "").trim(), cctv: (f[f.length - 1] || "").trim(),
-    rows: nos.map((no) => ({ no, risk: risks.find((x) => x.no === no)?.text || "", action: actions.find((x) => x.no === no)?.text || "" })), rawText: raw,
+    rows: mergeDSafetyNumbered(risks, actions), rawText: raw,
   };
 }
 
@@ -4086,30 +4165,47 @@ function renderDSafetySiteTabs() {
   }));
 }
 
+function renderDSafetyOpinionJobs(board) {
+  const select = $("#dSafetyOpinionJob");
+  if (!select) return;
+  const current = select.value;
+  const jobs = board ? splitDSafetyJobs(board.jobName) : [];
+  select.innerHTML = jobs.length
+    ? jobs.map((job) => `<option value="${escapeHtml(job)}">${escapeHtml(job)}</option>`).join("")
+    : `<option value="">작업명 미입력</option>`;
+  select.disabled = !board || !jobs.length;
+  if (jobs.includes(current)) select.value = current;
+  else if (jobs[0]) select.value = jobs[0];
+}
+
 function renderDSafetyBoard(board) {
   const viewer = $("#dSafetyViewer");
   if (!viewer) return;
   if (!board) {
-    viewer.innerHTML = `<div class="law-empty-state"><span>☷</span><h3>D-안전회의 자료가 없습니다</h3><p>선택한 사업장·날짜 조건에 등록된 회의가 없습니다.</p></div>`;
+    viewer.innerHTML = `<div class="law-empty-state"><span>☷</span><h3>D-안전소통보드 자료가 없습니다</h3><p>선택한 사업장·날짜 조건에 등록된 회의가 없습니다.</p></div>`;
     $("#dSafetyOpinionList").innerHTML = "";
+    renderDSafetyOpinionJobs(null);
     return;
   }
-  const rows = Array.isArray(board.rows) ? board.rows : [];
+  // 과거 버전에서 1-1 같은 하위 순번이 1번 본문에 합쳐져 저장된 경우도 화면에서 재분해/재정렬합니다.
+  const rows = normalizeDSafetyRows(board.rows);
   const site = dSafetySiteOf(board);
-  viewer.innerHTML = `<section class="panel dsafety-board-card"><div class="dsafety-board-title"><div><p class="eyebrow">D-SAFETY COMMUNICATION BOARD</p><h3>${escapeHtml(board.meetingDate || "D-안전회의")} · ${escapeHtml(board.location || "작업장")}</h3></div><div><span class="dsafety-board-site">${escapeHtml(site)}</span><span>${escapeHtml(String(board.peopleCount || 0))}명</span></div></div><div class="dsafety-info-grid"><div><span>사업장</span><b>${escapeHtml(site)}</b></div><div><span>작업시간</span><b>${escapeHtml(board.workTime || "-")}</b></div><div><span>작업명</span><b>${escapeHtml(board.jobName || "-")}</b></div><div><span>수행사</span><b>${escapeHtml(board.contractor || "-")}</b></div><div><span>작업담당자</span><b>${escapeHtml(board.workManager || "-")}</b></div><div><span>수행사 담당자</span><b>${escapeHtml(board.contractorManager || "-")}</b></div></div><div class="dsafety-risk-table-wrap"><table class="data-table dsafety-risk-table"><thead><tr><th>No.</th><th>⚠ 잠재위험</th><th>✓ 안전 조치사항</th></tr></thead><tbody>${rows.map((row) => `<tr><td>${escapeHtml(row.no)}</td><td>${escapeHtml(row.risk)}</td><td>${escapeHtml(row.action)}</td></tr>`).join("") || `<tr><td colspan="3">등록된 위험요인이 없습니다.</td></tr>`}</tbody></table></div></section>`;
+  const monitor = [board.monitorName, board.monitorDept ? `(${board.monitorDept})` : ""].filter(Boolean).join(" ") || "-";
+  viewer.innerHTML = `<section class="panel dsafety-board-card"><div class="dsafety-board-title"><div><p class="eyebrow">D-SAFETY COMMUNICATION BOARD</p><h3>${escapeHtml(board.meetingDate || "D-안전회의")} · ${escapeHtml(board.location || "작업장")}</h3></div><div><span class="dsafety-board-site">${escapeHtml(site)}</span><span>${escapeHtml(String(board.peopleCount || 0))}명</span></div></div><div class="dsafety-info-grid dsafety-info-grid-v2"><div class="dsafety-meta-site"><span>사업장</span><b>${escapeHtml(site)}</b></div><div class="dsafety-meta-time"><span>작업시간</span><b>${escapeHtml(board.workTime || "-")}</b></div><div class="dsafety-meta-job"><span>작업명</span><b>${escapeHtml(board.jobName || "-")}</b></div><div class="dsafety-meta-monitor"><span>안전Monitoring 요원</span><b>${escapeHtml(monitor)}</b></div><div class="dsafety-meta-contractor"><span>수행사</span><b>${escapeHtml(board.contractor || "-")}</b></div><div class="dsafety-meta-manager"><span>작업담당자</span><b>${escapeHtml(board.workManager || "-")}</b></div><div class="dsafety-meta-contractor-manager"><span>수행사 담당자</span><b>${escapeHtml(board.contractorManager || "-")}</b></div></div><div class="dsafety-risk-table-wrap"><table class="data-table dsafety-risk-table"><thead><tr><th>No.</th><th>⚠ 잠재위험</th><th>✓ 안전 조치사항</th></tr></thead><tbody>${rows.map((row) => `<tr><td>${escapeHtml(row.no)}</td><td>${escapeHtml(row.risk)}</td><td>${escapeHtml(row.action)}</td></tr>`).join("") || `<tr><td colspan="3">등록된 위험요인이 없습니다.</td></tr>`}</tbody></table></div></section>`;
+  renderDSafetyOpinionJobs(board);
   renderDSafetyOpinions(board.opinions || []);
 }
 
 function renderDSafetyOpinions(opinions = []) {
   const list = $("#dSafetyOpinionList");
   if (!list) return;
-  list.innerHTML = opinions.length ? `<div class="divider-label">접수된 종사자 의견 ${opinions.length}건</div>${opinions.map((item) => `<article class="dsafety-opinion-item"><div><b>${escapeHtml(item.name)} · ${escapeHtml(item.affiliation)}</b><time>${formatDate(item.createdAt)}</time></div><p>${escapeHtml(item.content)}</p></article>`).join("")}` : `<div class="dsafety-opinion-empty">아직 등록된 종사자 의견이 없습니다.</div>`;
+  list.innerHTML = opinions.length ? `<div class="divider-label">접수된 종사자 의견 ${opinions.length}건</div>${opinions.map((item) => `<article class="dsafety-opinion-item"><div><b>${escapeHtml(item.name)} · ${escapeHtml(item.affiliation)}</b><time>${formatDate(item.createdAt)}</time></div>${item.jobName ? `<span class="dsafety-opinion-job">작업 · ${escapeHtml(item.jobName)}</span>` : ""}<p>${escapeHtml(item.content)}</p></article>`).join("")}` : `<div class="dsafety-opinion-empty">아직 등록된 종사자 의견이 없습니다.</div>`;
 }
 
 function renderDSafetySelect(resetSelection = false) {
   const select = $("#dSafetyBoardSelect");
   const boards = filteredDSafetyBoards().slice().sort((a,b) => (normalizeDSafetyDate(b.meetingDate) || b.createdAt || "").localeCompare(normalizeDSafetyDate(a.meetingDate) || a.createdAt || ""));
-  select.innerHTML = boards.map((board) => `<option value="${escapeHtml(board.id)}">${escapeHtml(board.meetingDate || "날짜 미입력")} · ${escapeHtml(dSafetySiteOf(board))} · ${escapeHtml(board.jobName || board.location || "D-안전회의")}</option>`).join("") || `<option value="">등록된 D-안전회의 없음</option>`;
+  select.innerHTML = boards.map((board) => `<option value="${escapeHtml(board.id)}">${escapeHtml(board.meetingDate || "날짜 미입력")} · ${escapeHtml(dSafetySiteOf(board))} · ${escapeHtml(board.jobName || board.location || "D-안전회의")}</option>`).join("") || `<option value="">등록된 D-안전소통보드 없음</option>`;
   if (!resetSelection && boards.some((item) => item.id === state.dSafety.selectedId)) select.value = state.dSafety.selectedId;
   else if (boards[0]) { state.dSafety.selectedId = boards[0].id; select.value = boards[0].id; }
   else state.dSafety.selectedId = null;
@@ -4180,10 +4276,12 @@ async function submitDSafetyOpinion() {
   if (!id) return toast("의견을 등록할 D-안전회의를 먼저 선택해주세요.");
   const affiliation = $("#dSafetyOpinionDept").value.trim();
   const name = $("#dSafetyOpinionName").value.trim();
+  const jobName = $("#dSafetyOpinionJob")?.value.trim() || "";
   const content = $("#dSafetyOpinionContent").value.trim();
   if (!affiliation || !name || !content) return toast("소속, 이름, 의견을 모두 입력해주세요.");
+  if (!jobName && splitDSafetyJobs(state.dSafety.current?.jobName || "").length) return toast("의견을 남길 작업명을 선택해주세요.");
   try {
-    await api(`/api/d-safety/boards/${encodeURIComponent(id)}/opinions`, { method: "POST", body: JSON.stringify({ affiliation, name, content }) });
+    await api(`/api/d-safety/boards/${encodeURIComponent(id)}/opinions`, { method: "POST", body: JSON.stringify({ affiliation, name, jobName, content }) });
     localStorage.setItem("poseidon-dsafety-opinion-user", JSON.stringify({ affiliation, name }));
     $("#dSafetyOpinionContent").value = "";
     toast("종사자 의견이 접수되었습니다.");
