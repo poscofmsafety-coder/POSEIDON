@@ -94,6 +94,33 @@ const SCHEMA = [
     byte_length INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY(document_id, chunk_index)
   )`,
+  `CREATE TABLE IF NOT EXISTS d_safety_boards (
+    id TEXT PRIMARY KEY,
+    meeting_date TEXT NOT NULL DEFAULT '',
+    work_time TEXT NOT NULL DEFAULT '',
+    location TEXT NOT NULL DEFAULT '',
+    job_name TEXT NOT NULL DEFAULT '',
+    people_count INTEGER NOT NULL DEFAULT 0,
+    contractor TEXT NOT NULL DEFAULT '',
+    work_manager TEXT NOT NULL DEFAULT '',
+    contractor_manager TEXT NOT NULL DEFAULT '',
+    monitor_name TEXT NOT NULL DEFAULT '',
+    monitor_dept TEXT NOT NULL DEFAULT '',
+    cctv TEXT NOT NULL DEFAULT '',
+    rows_json TEXT NOT NULL DEFAULT '[]',
+    raw_text TEXT NOT NULL DEFAULT '',
+    created_by TEXT NOT NULL DEFAULT 'admin',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS d_safety_opinions (
+    id TEXT PRIMARY KEY,
+    board_id TEXT NOT NULL,
+    affiliation TEXT NOT NULL DEFAULT '',
+    author_name TEXT NOT NULL DEFAULT '',
+    content TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  )`,
   `CREATE TABLE IF NOT EXISTS app_settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL,
@@ -101,6 +128,8 @@ const SCHEMA = [
   )`,
   `CREATE INDEX IF NOT EXISTS idx_msds_title ON msds_documents(title)`,
   `CREATE INDEX IF NOT EXISTS idx_msds_uploaded ON msds_documents(uploaded_at DESC)`,
+  `CREATE INDEX IF NOT EXISTS idx_dsafety_created ON d_safety_boards(created_at DESC)`,
+  `CREATE INDEX IF NOT EXISTS idx_dsafety_opinion_board ON d_safety_opinions(board_id, created_at DESC)`,
   `CREATE INDEX IF NOT EXISTS idx_training_device ON training_samples(device_id, captured_at DESC)`,
   `CREATE INDEX IF NOT EXISTS idx_stop_work_occurred ON stop_work_requests(occurred_at DESC)`,
   `CREATE INDEX IF NOT EXISTS idx_stop_work_device ON stop_work_requests(device_id, occurred_at DESC)`,
@@ -188,6 +217,7 @@ function defaultConfig() {
       },
     },
     detection: { confidence: 0.31, consecutiveFrames: 2, intervalMs: 1000 },
+    privacy: { faceMosaic: false },
   };
 }
 
@@ -510,7 +540,7 @@ function base64ToBytes(base64) {
 }
 
 function stopWorkNotificationText(detail) {
-  return [
+  const lines = [
     "[POSEIDON 작업중지권 발동]",
     `장치: ${detail.deviceName || detail.deviceId}`,
     `사업장/구역: ${detail.site || "-"} / ${detail.area || "-"}`,
@@ -518,8 +548,12 @@ function stopWorkNotificationText(detail) {
     `연락처: ${detail.reporterContact || "미입력"}`,
     `사유: ${detail.reason}`,
     `시간: ${detail.occurredAt}`,
-    detail.clipUrl ? `전후 영상: ${detail.origin}${detail.clipUrl}` : "전후 영상: 저장 없음",
-  ].join("\n");
+  ];
+  if (detail.beforeClipUrl) lines.push(`발동 전 영상: ${detail.origin}${detail.beforeClipUrl}`);
+  if (detail.afterClipUrl) lines.push(`발동 후 영상: ${detail.origin}${detail.afterClipUrl}`);
+  if (!detail.beforeClipUrl && !detail.afterClipUrl && detail.clipUrl) lines.push(`영상: ${detail.origin}${detail.clipUrl}`);
+  if (!detail.beforeClipUrl && !detail.afterClipUrl && !detail.clipUrl) lines.push("영상: 저장 없음");
+  return lines.join("\n");
 }
 
 async function sendStopWorkEmail(env, detail) {
@@ -574,6 +608,787 @@ async function sendStopWorkWebhook(env, detail) {
   });
   if (!response.ok) throw new Error(`webhook ${response.status}`);
   return { channel: "webhook", configured: true, sent: true };
+}
+
+function defaultEmergencyCallOptions() {
+  return [
+  {
+    "id": "call-general",
+    "site": "공통",
+    "label": "일반 119",
+    "phone": "119"
+  },
+  {
+    "id": "call-gwangyang",
+    "site": "광양제철소",
+    "label": "광양제철소 119",
+    "phone": "061-790-0119"
+  },
+  {
+    "id": "call-pohang",
+    "site": "포항제철소",
+    "label": "포항제철소 119",
+    "phone": "054-290-0119"
+  }
+];
+}
+
+function defaultEmergencyContacts() {
+  return [
+  {
+    "id": "contact-001",
+    "region": "공통",
+    "type": "사내",
+    "department": "사업장 안전환경부서",
+    "name": "",
+    "phone": "",
+    "note": "담당자 이름·연락처는 관리자가 필요한 경우 직접 등록"
+  },
+  {
+    "id": "contact-002",
+    "region": "포항",
+    "type": "사내",
+    "department": "포항안전환경그룹",
+    "name": "",
+    "phone": "",
+    "note": "담당자 이름·연락처 미등록"
+  },
+  {
+    "id": "contact-003",
+    "region": "광양",
+    "type": "사내",
+    "department": "광양안전환경그룹",
+    "name": "",
+    "phone": "",
+    "note": "담당자 이름·연락처 미등록"
+  },
+  {
+    "id": "contact-004",
+    "region": "공통",
+    "type": "사내",
+    "department": "공사안전섹션 (에너지소재기획실)",
+    "name": "",
+    "phone": "",
+    "note": "담당자 이름·연락처 미등록"
+  },
+  {
+    "id": "contact-005",
+    "region": "공통",
+    "type": "사내",
+    "department": "플랜트안전섹션",
+    "name": "",
+    "phone": "",
+    "note": "담당자 이름·연락처 미등록"
+  },
+  {
+    "id": "contact-006",
+    "region": "포항",
+    "type": "안전보건",
+    "department": "고용노동부 산재예방지도과",
+    "name": "",
+    "phone": "054-271-6836",
+    "note": ""
+  },
+  {
+    "id": "contact-007",
+    "region": "포항",
+    "type": "안전보건",
+    "department": "경북권중대산업사고예방센터",
+    "name": "",
+    "phone": "054-459-1141",
+    "note": ""
+  },
+  {
+    "id": "contact-008",
+    "region": "포항",
+    "type": "안전보건",
+    "department": "포항남부소방서",
+    "name": "",
+    "phone": "054-286-1193",
+    "note": ""
+  },
+  {
+    "id": "contact-009",
+    "region": "포항",
+    "type": "안전보건",
+    "department": "청림치안센터(파출소)",
+    "name": "",
+    "phone": "054-240-8115",
+    "note": ""
+  },
+  {
+    "id": "contact-010",
+    "region": "포항",
+    "type": "안전보건",
+    "department": "일월 119 안전센터",
+    "name": "",
+    "phone": "054-284-2725",
+    "note": ""
+  },
+  {
+    "id": "contact-011",
+    "region": "포항",
+    "type": "안전보건",
+    "department": "포항남부경찰서(주간)",
+    "name": "",
+    "phone": "054-240-8324",
+    "note": ""
+  },
+  {
+    "id": "contact-012",
+    "region": "포항",
+    "type": "안전보건",
+    "department": "포항남부경찰서(야간)",
+    "name": "",
+    "phone": "054-240-8329",
+    "note": ""
+  },
+  {
+    "id": "contact-013",
+    "region": "포항",
+    "type": "안전보건",
+    "department": "근로복지공단 포항지사",
+    "name": "",
+    "phone": "1588-0075",
+    "note": ""
+  },
+  {
+    "id": "contact-014",
+    "region": "포항",
+    "type": "환경",
+    "department": "포항시청",
+    "name": "",
+    "phone": "054-270-8282",
+    "note": ""
+  },
+  {
+    "id": "contact-015",
+    "region": "포항",
+    "type": "환경",
+    "department": "경북도청",
+    "name": "",
+    "phone": "054-880-3542",
+    "note": ""
+  },
+  {
+    "id": "contact-016",
+    "region": "포항",
+    "type": "환경",
+    "department": "대구지방환경청",
+    "name": "",
+    "phone": "053-230-6402",
+    "note": ""
+  },
+  {
+    "id": "contact-017",
+    "region": "포항",
+    "type": "의료기관",
+    "department": "포항세명기독병원",
+    "name": "",
+    "phone": "054-275-0005",
+    "note": ""
+  },
+  {
+    "id": "contact-018",
+    "region": "포항",
+    "type": "의료기관",
+    "department": "포항좋은선린병원",
+    "name": "",
+    "phone": "054-245-5000",
+    "note": ""
+  },
+  {
+    "id": "contact-019",
+    "region": "포항",
+    "type": "의료기관",
+    "department": "포항성모병원",
+    "name": "",
+    "phone": "054-272-0151",
+    "note": ""
+  },
+  {
+    "id": "contact-020",
+    "region": "포항",
+    "type": "의료기관",
+    "department": "오학윤정형외과",
+    "name": "",
+    "phone": "054-273-1199",
+    "note": ""
+  },
+  {
+    "id": "contact-021",
+    "region": "포항",
+    "type": "의료기관",
+    "department": "경북소방본부 119항공대",
+    "name": "",
+    "phone": "054-880-6521",
+    "note": ""
+  },
+  {
+    "id": "contact-022",
+    "region": "포항",
+    "type": "협조기관",
+    "department": "해군항공단",
+    "name": "",
+    "phone": "054-290-6331",
+    "note": ""
+  },
+  {
+    "id": "contact-023",
+    "region": "포항",
+    "type": "협조기관",
+    "department": "OCI 포항공장",
+    "name": "",
+    "phone": "054-290-8000",
+    "note": ""
+  },
+  {
+    "id": "contact-024",
+    "region": "포항",
+    "type": "협조기관",
+    "department": "청림동주민센터",
+    "name": "",
+    "phone": "054-270-6751",
+    "note": ""
+  },
+  {
+    "id": "contact-025",
+    "region": "포항",
+    "type": "협조기관",
+    "department": "나눔지역자활센터",
+    "name": "",
+    "phone": "054-252-4470",
+    "note": ""
+  },
+  {
+    "id": "contact-026",
+    "region": "포항",
+    "type": "협조기관",
+    "department": "포항제철소 119 / 방재",
+    "name": "",
+    "phone": "054-290-0119",
+    "note": ""
+  },
+  {
+    "id": "contact-027",
+    "region": "포항",
+    "type": "협조기관",
+    "department": "포스코(포항소) 환경센터",
+    "name": "",
+    "phone": "054-220-4440",
+    "note": ""
+  },
+  {
+    "id": "contact-028",
+    "region": "광양",
+    "type": "안전보건",
+    "department": "고용노동부 여수지청",
+    "name": "",
+    "phone": "061-650-0130",
+    "note": ""
+  },
+  {
+    "id": "contact-029",
+    "region": "광양",
+    "type": "안전보건",
+    "department": "전남권중대산업사고예방센터",
+    "name": "",
+    "phone": "061-690-1674",
+    "note": ""
+  },
+  {
+    "id": "contact-030",
+    "region": "광양",
+    "type": "안전보건",
+    "department": "광양소방서",
+    "name": "",
+    "phone": "061-798-0900",
+    "note": ""
+  },
+  {
+    "id": "contact-031",
+    "region": "광양",
+    "type": "안전보건",
+    "department": "광양119안전센터",
+    "name": "",
+    "phone": "061-798-0926",
+    "note": ""
+  },
+  {
+    "id": "contact-032",
+    "region": "광양",
+    "type": "안전보건",
+    "department": "여수금호파출소",
+    "name": "",
+    "phone": "061-840-2132",
+    "note": ""
+  },
+  {
+    "id": "contact-033",
+    "region": "광양",
+    "type": "안전보건",
+    "department": "근로복지공단 여수지사",
+    "name": "",
+    "phone": "1588-0075",
+    "note": ""
+  },
+  {
+    "id": "contact-034",
+    "region": "광양",
+    "type": "환경",
+    "department": "광양시청",
+    "name": "",
+    "phone": "061-797-2114",
+    "note": ""
+  },
+  {
+    "id": "contact-035",
+    "region": "광양",
+    "type": "환경",
+    "department": "전남도청",
+    "name": "",
+    "phone": "061-287-0011",
+    "note": ""
+  },
+  {
+    "id": "contact-036",
+    "region": "광양",
+    "type": "환경",
+    "department": "영산강유역환경청",
+    "name": "",
+    "phone": "062-410-5114",
+    "note": ""
+  },
+  {
+    "id": "contact-037",
+    "region": "광양",
+    "type": "의료기관",
+    "department": "광양사랑병원",
+    "name": "",
+    "phone": "061-797-7000",
+    "note": ""
+  },
+  {
+    "id": "contact-038",
+    "region": "광양",
+    "type": "의료기관",
+    "department": "광양강남병원",
+    "name": "",
+    "phone": "061-818-7575",
+    "note": ""
+  },
+  {
+    "id": "contact-039",
+    "region": "광양",
+    "type": "의료기관",
+    "department": "근로복지공단 순천병원",
+    "name": "",
+    "phone": "061-720-7114",
+    "note": ""
+  },
+  {
+    "id": "contact-040",
+    "region": "광양",
+    "type": "의료기관",
+    "department": "순천성가롤로병원",
+    "name": "",
+    "phone": "061-720-2000",
+    "note": ""
+  },
+  {
+    "id": "contact-041",
+    "region": "광양",
+    "type": "의료기관",
+    "department": "전남소방본부 119항공대",
+    "name": "",
+    "phone": "061-860-5156",
+    "note": ""
+  },
+  {
+    "id": "contact-042",
+    "region": "광양",
+    "type": "협조기관",
+    "department": "광양제철소 119 / 방재",
+    "name": "",
+    "phone": "061-790-0119",
+    "note": ""
+  },
+  {
+    "id": "contact-043",
+    "region": "광양",
+    "type": "협조기관",
+    "department": "포스코(광양소) 환경센터",
+    "name": "",
+    "phone": "061-790-4440",
+    "note": ""
+  },
+  {
+    "id": "contact-044",
+    "region": "세종",
+    "type": "안전보건",
+    "department": "대전지방고용노동청",
+    "name": "",
+    "phone": "042-480-6290",
+    "note": ""
+  },
+  {
+    "id": "contact-045",
+    "region": "세종",
+    "type": "안전보건",
+    "department": "금강화학안전관리단",
+    "name": "",
+    "phone": "042-865-0761",
+    "note": ""
+  },
+  {
+    "id": "contact-046",
+    "region": "세종",
+    "type": "안전보건",
+    "department": "세종경찰서 운주지구대",
+    "name": "",
+    "phone": "044-863-2112",
+    "note": ""
+  },
+  {
+    "id": "contact-047",
+    "region": "세종",
+    "type": "안전보건",
+    "department": "소정면119지역대",
+    "name": "",
+    "phone": "041-566-6119",
+    "note": ""
+  },
+  {
+    "id": "contact-048",
+    "region": "세종",
+    "type": "안전보건",
+    "department": "전의의용소방대",
+    "name": "",
+    "phone": "044-863-2119",
+    "note": ""
+  },
+  {
+    "id": "contact-049",
+    "region": "세종",
+    "type": "안전보건",
+    "department": "근로복지공단 유성지사",
+    "name": "",
+    "phone": "1588-0075",
+    "note": ""
+  },
+  {
+    "id": "contact-050",
+    "region": "세종",
+    "type": "환경",
+    "department": "세종시청",
+    "name": "",
+    "phone": "044-300-4201",
+    "note": ""
+  },
+  {
+    "id": "contact-051",
+    "region": "세종",
+    "type": "환경",
+    "department": "충남도청",
+    "name": "",
+    "phone": "041-635-2720",
+    "note": ""
+  },
+  {
+    "id": "contact-052",
+    "region": "세종",
+    "type": "환경",
+    "department": "금강유역환경청",
+    "name": "",
+    "phone": "042-865-0800",
+    "note": ""
+  },
+  {
+    "id": "contact-053",
+    "region": "세종",
+    "type": "의료기관",
+    "department": "천안단국대병원",
+    "name": "",
+    "phone": "041-550-6840",
+    "note": ""
+  },
+  {
+    "id": "contact-054",
+    "region": "세종",
+    "type": "의료기관",
+    "department": "천안의료원",
+    "name": "",
+    "phone": "041-570-7119",
+    "note": ""
+  },
+  {
+    "id": "contact-055",
+    "region": "세종",
+    "type": "의료기관",
+    "department": "천안충무병원",
+    "name": "",
+    "phone": "041-570-7519",
+    "note": ""
+  },
+  {
+    "id": "contact-056",
+    "region": "세종",
+    "type": "의료기관",
+    "department": "천안우리병원",
+    "name": "",
+    "phone": "041-590-9000",
+    "note": ""
+  },
+  {
+    "id": "contact-057",
+    "region": "세종",
+    "type": "의료기관",
+    "department": "천안화사의원(화상)",
+    "name": "",
+    "phone": "041-576-1195",
+    "note": ""
+  },
+  {
+    "id": "contact-058",
+    "region": "세종",
+    "type": "의료기관",
+    "department": "천안손사랑의원",
+    "name": "",
+    "phone": "041-415-1119",
+    "note": ""
+  },
+  {
+    "id": "contact-059",
+    "region": "세종",
+    "type": "의료기관",
+    "department": "청주마이크로병원",
+    "name": "",
+    "phone": "043-265-0071",
+    "note": ""
+  },
+  {
+    "id": "contact-060",
+    "region": "세종",
+    "type": "의료기관",
+    "department": "세종누가연합의원",
+    "name": "",
+    "phone": "044-863-0494",
+    "note": ""
+  },
+  {
+    "id": "contact-061",
+    "region": "세종",
+    "type": "협조기관",
+    "department": "전의산단관리사무소",
+    "name": "",
+    "phone": "044-868-8650",
+    "note": ""
+  },
+  {
+    "id": "contact-062",
+    "region": "세종",
+    "type": "협조기관",
+    "department": "세종첨단산업단지",
+    "name": "",
+    "phone": "044-866-5005",
+    "note": ""
+  },
+  {
+    "id": "contact-063",
+    "region": "세종",
+    "type": "협조기관",
+    "department": "세종음극재경비실(1공장)",
+    "name": "",
+    "phone": "044-850-2799",
+    "note": ""
+  },
+  {
+    "id": "contact-064",
+    "region": "세종",
+    "type": "협조기관",
+    "department": "세종음극재경비실(2공장)",
+    "name": "",
+    "phone": "044-850-2699",
+    "note": ""
+  },
+  {
+    "id": "contact-065",
+    "region": "세종",
+    "type": "협조기관",
+    "department": "대한산업안전협회 대전본부",
+    "name": "",
+    "phone": "042-628-2160",
+    "note": ""
+  },
+  {
+    "id": "contact-066",
+    "region": "구미",
+    "type": "안전보건",
+    "department": "고용노동부 산재예방지도과",
+    "name": "",
+    "phone": "054-450-3550",
+    "note": ""
+  },
+  {
+    "id": "contact-067",
+    "region": "구미",
+    "type": "안전보건",
+    "department": "경북권중대산업사고예방센터",
+    "name": "",
+    "phone": "054-459-1141",
+    "note": ""
+  },
+  {
+    "id": "contact-068",
+    "region": "구미",
+    "type": "안전보건",
+    "department": "구미경찰서",
+    "name": "",
+    "phone": "054-450-3324",
+    "note": ""
+  },
+  {
+    "id": "contact-069",
+    "region": "구미",
+    "type": "안전보건",
+    "department": "구미소방서",
+    "name": "",
+    "phone": "054-440-0143",
+    "note": ""
+  },
+  {
+    "id": "contact-070",
+    "region": "구미",
+    "type": "안전보건",
+    "department": "옥계119 안전센터",
+    "name": "",
+    "phone": "054-471-5119",
+    "note": ""
+  },
+  {
+    "id": "contact-071",
+    "region": "구미",
+    "type": "안전보건",
+    "department": "근로복지공단 구미지사",
+    "name": "",
+    "phone": "1588-0075",
+    "note": ""
+  },
+  {
+    "id": "contact-072",
+    "region": "구미",
+    "type": "환경",
+    "department": "구미시 안전재난과",
+    "name": "",
+    "phone": "054-480-6736",
+    "note": ""
+  },
+  {
+    "id": "contact-073",
+    "region": "구미",
+    "type": "환경",
+    "department": "경북도청 재난안전실",
+    "name": "",
+    "phone": "054-880-2300",
+    "note": ""
+  },
+  {
+    "id": "contact-074",
+    "region": "구미",
+    "type": "환경",
+    "department": "구미합동방재센터",
+    "name": "",
+    "phone": "054-459-1119",
+    "note": ""
+  },
+  {
+    "id": "contact-075",
+    "region": "구미",
+    "type": "환경",
+    "department": "대구지방환경청",
+    "name": "",
+    "phone": "053-230-6574",
+    "note": ""
+  },
+  {
+    "id": "contact-076",
+    "region": "구미",
+    "type": "의료기관",
+    "department": "구미순천향대학병원",
+    "name": "",
+    "phone": "054-468-9119",
+    "note": ""
+  },
+  {
+    "id": "contact-077",
+    "region": "구미",
+    "type": "의료기관",
+    "department": "갑을구미병원",
+    "name": "",
+    "phone": "054-710-6000",
+    "note": ""
+  },
+  {
+    "id": "contact-078",
+    "region": "구미",
+    "type": "협조기관",
+    "department": "산동읍사무소",
+    "name": "",
+    "phone": "054-480-7877",
+    "note": ""
+  }
+];
+}
+
+function isLegacyEmergencyContacts(contacts) {
+  if (!Array.isArray(contacts) || contacts.length === 0) return true;
+  const ids = new Set(contacts.map((item) => String(item?.id || "")));
+  return contacts.length <= 4 && ["contact-119", "contact-hospital", "contact-labor", "contact-manager"].some((id) => ids.has(id));
+}
+
+async function getEmergencyConfig(env) {
+  const rawContacts = await readSetting(env, "emergency_contacts", "");
+  let contacts = safeJsonParse(rawContacts, null);
+  if (!Array.isArray(contacts) || isLegacyEmergencyContacts(contacts)) contacts = defaultEmergencyContacts();
+
+  const rawCalls = await readSetting(env, "emergency_call_options", "");
+  let callOptions = safeJsonParse(rawCalls, null);
+  if (!Array.isArray(callOptions) || !callOptions.length) callOptions = defaultEmergencyCallOptions();
+
+  let defaultCallId = await readSetting(env, "emergency_default_call_id", "call-general");
+  if (!callOptions.some((item) => item.id === defaultCallId)) defaultCallId = callOptions[0]?.id || "call-general";
+
+  const chartKey = await readSetting(env, "emergency_chart_key", "");
+  return {
+    contacts,
+    callOptions,
+    defaultCallId,
+    chartUrl: chartKey ? `/media/${encodeURIComponent(chartKey)}` : null,
+  };
+}
+
+function normalizeEmergencyContacts(contacts) {
+  const source = Array.isArray(contacts) ? contacts : [];
+  return source.slice(0, 160).map((item, index) => ({
+    id: String(item?.id || `contact-${index}-${crypto.randomUUID().slice(0, 6)}`),
+    region: String(item?.region || "공통").trim().slice(0, 30),
+    type: String(item?.type || "기타").trim().slice(0, 40),
+    department: String(item?.department || item?.organization || "").trim().slice(0, 100),
+    name: String(item?.name || "").trim().slice(0, 80),
+    phone: String(item?.phone || "").trim().slice(0, 40),
+    note: String(item?.note || "").trim().slice(0, 180),
+  })).filter((item) => item.department || item.name || item.phone);
+}
+
+function normalizeEmergencyCallOptions(options) {
+  const source = Array.isArray(options) ? options : [];
+  const normalized = source.slice(0, 20).map((item, index) => ({
+    id: String(item?.id || `call-${index}-${crypto.randomUUID().slice(0, 6)}`),
+    site: String(item?.site || "공통").trim().slice(0, 60),
+    label: String(item?.label || item?.name || "비상전화").trim().slice(0, 80),
+    phone: String(item?.phone || "").trim().slice(0, 40),
+  })).filter((item) => item.label && item.phone);
+  return normalized.length ? normalized : defaultEmergencyCallOptions();
 }
 
 async function sendStopWorkNotifications(env, detail) {
@@ -931,6 +1746,35 @@ async function serveMsdsPdf(request, env, id) {
 }
 
 
+/* ---------- D-safety meeting / worker voice ---------- */
+
+function mapDSafetyBoard(row) {
+  return {
+    id: row.id,
+    meetingDate: row.meeting_date || "",
+    workTime: row.work_time || "",
+    location: row.location || "",
+    jobName: row.job_name || "",
+    peopleCount: Number(row.people_count || 0),
+    contractor: row.contractor || "",
+    workManager: row.work_manager || "",
+    contractorManager: row.contractor_manager || "",
+    monitorName: row.monitor_name || "",
+    monitorDept: row.monitor_dept || "",
+    cctv: row.cctv || "",
+    rows: safeJsonParse(row.rows_json, []),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+async function getDSafetyBoard(env, id) {
+  const row = await env.DB.prepare("SELECT * FROM d_safety_boards WHERE id=?").bind(id).first();
+  if (!row) return null;
+  const opinions = await env.DB.prepare("SELECT * FROM d_safety_opinions WHERE board_id=? ORDER BY created_at DESC LIMIT 200").bind(id).all();
+  return { ...mapDSafetyBoard(row), opinions: (opinions.results || []).map((item) => ({ id: item.id, boardId: item.board_id, affiliation: item.affiliation || "", name: item.author_name || "", content: item.content || "", createdAt: item.created_at })) };
+}
+
 /* ---------- API ---------- */
 
 async function handleAuth(request, env) {
@@ -1052,6 +1896,111 @@ async function handleApi(request, env, ctx) {
     ]);
     return json({ ok: true, data: { id, deleted: true, stats: await getMsdsStats(env) } });
   }
+  if (path === "/api/emergency/config" && method === "GET") return json({ ok: true, data: await getEmergencyConfig(env) });
+  if (path === "/api/emergency/config" && method === "PUT") {
+    if (!isAdmin) return error("비상연락망 수정은 관리자 권한이 필요합니다.", 403);
+    const body = await readJson(request);
+    const current = await getEmergencyConfig(env);
+    const contacts = Object.prototype.hasOwnProperty.call(body, "contacts") ? normalizeEmergencyContacts(body.contacts) : current.contacts;
+    const callOptions = Object.prototype.hasOwnProperty.call(body, "callOptions") ? normalizeEmergencyCallOptions(body.callOptions) : current.callOptions;
+    let defaultCallId = String(body.defaultCallId || current.defaultCallId || callOptions[0]?.id || "").trim();
+    if (!callOptions.some((item) => item.id === defaultCallId)) defaultCallId = callOptions[0]?.id || "";
+    await writeSetting(env, "emergency_contacts", JSON.stringify(contacts));
+    await writeSetting(env, "emergency_call_options", JSON.stringify(callOptions));
+    await writeSetting(env, "emergency_default_call_id", defaultCallId);
+    return json({ ok: true, data: await getEmergencyConfig(env) });
+  }
+
+  if (path === "/api/emergency/chart" && method === "POST") {
+    if (!isAdmin) return error("보고체계도 등록은 관리자 권한이 필요합니다.", 403);
+    const contentType = request.headers.get("content-type") || "image/jpeg";
+    if (!contentType.startsWith("image/")) return error("이미지 파일만 등록할 수 있습니다.");
+    const bytes = new Uint8Array(await request.arrayBuffer());
+    if (!bytes.byteLength) return error("이미지 파일이 비어 있습니다.");
+    if (bytes.byteLength > 1_450_000) return error("보고체계도 이미지는 1.45MB 이하로 압축해서 등록해주세요.", 413);
+    const oldKey = await readSetting(env, "emergency_chart_key", "");
+    const key = "emergency/report-chart";
+    const stored = await putImage(env, key, bytes, contentType);
+    if (!stored) return error("보고체계도 이미지를 저장하지 못했습니다.", 500);
+    await writeSetting(env, "emergency_chart_key", key);
+    if (oldKey && oldKey !== key) await env.DB.prepare("DELETE FROM media WHERE key=?").bind(oldKey).run();
+    return json({ ok: true, data: await getEmergencyConfig(env) }, 201);
+  }
+
+  if (path === "/api/emergency/report" && method === "POST") {
+    const body = await readJson(request);
+    const latitude = Number(body.latitude);
+    const longitude = Number(body.longitude);
+    if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90 || !Number.isFinite(longitude) || longitude < -180 || longitude > 180) return error("현재 GPS 위치를 먼저 확인해주세요.");
+    const deviceId = String(body.deviceId || "manual-emergency").trim().slice(0, 120) || "manual-emergency";
+    const reporterName = String(body.reporterName || "").trim().slice(0, 80);
+    const reporterContact = String(body.reporterContact || "").trim().slice(0, 100);
+    const note = String(body.note || "119 비상대응 위치 전송").trim().slice(0, 600);
+    const accuracy = Math.max(0, Number(body.accuracy || 0));
+    const occurredAt = String(body.occurredAt || nowIso());
+    const eventId = randomId("evt");
+    const device = await env.DB.prepare("SELECT name,site,area FROM devices WHERE id=?").bind(deviceId).first();
+    const metadata = { emergency119: true, reporterName, reporterContact, note, latitude, longitude, accuracy, mapUrl: `https://www.google.com/maps?q=${latitude},${longitude}` };
+    await env.DB.prepare(`INSERT INTO events (id,device_id,type,category,severity,message,occurred_at,acknowledged,status,snapshot_key,metadata_json,created_at) VALUES (?,?,?,?,?,?,?,0,'즉시 확인',NULL,?,?)`)
+      .bind(eventId, deviceId, "EMERGENCY_119", "비상신고", "critical", `119 비상대응 GPS 전송: ${note}`, occurredAt, JSON.stringify(metadata), nowIso()).run();
+    if (device) await env.DB.prepare("UPDATE devices SET current_risk='비상신고',last_seen=?,updated_at=? WHERE id=?").bind(nowIso(), nowIso(), deviceId).run();
+    return json({ ok: true, data: { eventId, mapUrl: metadata.mapUrl } }, 201);
+  }
+
+  if (path === "/api/d-safety/boards" && method === "GET") {
+    const result = await env.DB.prepare("SELECT * FROM d_safety_boards ORDER BY created_at DESC LIMIT 100").all();
+    return json({ ok: true, data: (result.results || []).map(mapDSafetyBoard) });
+  }
+  if (path === "/api/d-safety/boards" && method === "POST") {
+    if (!isAdmin) return error("D-안전회의 등록은 관리자 권한이 필요합니다.", 403);
+    const body = await readJson(request);
+    const id = randomId("dsafety");
+    const created = nowIso();
+    const rows = Array.isArray(body.rows) ? body.rows.slice(0, 100).map((row) => ({ no: String(row.no || "-"), risk: String(row.risk || "").slice(0, 2500), action: String(row.action || "").slice(0, 2500) })) : [];
+    await env.DB.prepare(`INSERT INTO d_safety_boards (id,meeting_date,work_time,location,job_name,people_count,contractor,work_manager,contractor_manager,monitor_name,monitor_dept,cctv,rows_json,raw_text,created_by,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'admin',?,?)`)
+      .bind(id, String(body.meetingDate || "").slice(0,40), String(body.workTime || "").slice(0,80), String(body.location || "").slice(0,240), String(body.jobName || "").slice(0,800), Math.max(0, Number(body.peopleCount || 0)), String(body.contractor || "").slice(0,160), String(body.workManager || "").slice(0,100), String(body.contractorManager || "").slice(0,100), String(body.monitorName || "").slice(0,100), String(body.monitorDept || "").slice(0,120), String(body.cctv || "").slice(0,60), JSON.stringify(rows), String(body.rawText || "").slice(0,20000), created, created).run();
+    return json({ ok: true, data: await getDSafetyBoard(env, id) }, 201);
+  }
+  const dSafetyBoardMatch = path.match(/^\/api\/d-safety\/boards\/([^/]+)$/);
+  if (dSafetyBoardMatch && method === "GET") {
+    const board = await getDSafetyBoard(env, decodeURIComponent(dSafetyBoardMatch[1]));
+    if (!board) return error("D-안전회의 자료를 찾을 수 없습니다.", 404);
+    return json({ ok: true, data: board });
+  }
+  if (dSafetyBoardMatch && method === "DELETE") {
+    if (!isAdmin) return error("D-안전회의 삭제는 관리자 권한이 필요합니다.", 403);
+    const id = decodeURIComponent(dSafetyBoardMatch[1]);
+    await env.DB.batch([env.DB.prepare("DELETE FROM d_safety_opinions WHERE board_id=?").bind(id), env.DB.prepare("DELETE FROM d_safety_boards WHERE id=?").bind(id)]);
+    return json({ ok: true });
+  }
+  const dSafetyOpinionMatch = path.match(/^\/api\/d-safety\/boards\/([^/]+)\/opinions$/);
+  if (dSafetyOpinionMatch && method === "POST") {
+    const boardId = decodeURIComponent(dSafetyOpinionMatch[1]);
+    const exists = await env.DB.prepare("SELECT id FROM d_safety_boards WHERE id=?").bind(boardId).first();
+    if (!exists) return error("D-안전회의 자료를 찾을 수 없습니다.", 404);
+    const body = await readJson(request);
+    const affiliation = String(body.affiliation || "").trim().slice(0, 100);
+    const authorName = String(body.name || "").trim().slice(0, 80);
+    const content = String(body.content || "").trim().slice(0, 1200);
+    if (!affiliation || !authorName || !content) return error("소속, 이름, 의견을 모두 입력해주세요.");
+    const id = randomId("opinion");
+    const createdAt = nowIso();
+    await env.DB.prepare("INSERT INTO d_safety_opinions (id,board_id,affiliation,author_name,content,created_at) VALUES (?,?,?,?,?,?)").bind(id, boardId, affiliation, authorName, content, createdAt).run();
+    return json({ ok: true, data: { id, boardId, affiliation, name: authorName, content, createdAt } }, 201);
+  }
+
+  if (path === "/api/guard/privacy" && method === "PUT") {
+    const body = await readJson(request);
+    const deviceId = String(body.deviceId || "").trim();
+    if (!deviceId) return error("deviceId가 필요합니다.");
+    const row = await env.DB.prepare("SELECT config_json FROM devices WHERE id=?").bind(deviceId).first();
+    if (!row) return error("장치를 찾을 수 없습니다.", 404);
+    const config = safeJsonParse(row.config_json, defaultConfig());
+    config.privacy ||= {};
+    config.privacy.faceMosaic = body.faceMosaic === true;
+    await env.DB.prepare("UPDATE devices SET config_json=?,updated_at=? WHERE id=?").bind(JSON.stringify(config), nowIso(), deviceId).run();
+    return json({ ok: true, data: config.privacy });
+  }
 
   if (path === "/api/stop-work" && method === "POST") {
     const contentType = request.headers.get("content-type") || "";
@@ -1152,6 +2101,8 @@ async function handleApi(request, env, ctx) {
       reason,
       occurredAt,
       clipUrl,
+      beforeClipUrl: beforeMedia.url,
+      afterClipUrl: afterMedia.url,
       origin,
     };
     const notificationResults = await sendStopWorkNotifications(env, detail);

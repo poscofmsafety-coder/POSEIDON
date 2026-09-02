@@ -1,4 +1,4 @@
-const POSEIDON_BUILD = "6.9.0";
+const POSEIDON_BUILD = "6.12.0";
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -16,6 +16,8 @@ const pageTitles = {
   equipment: "중장비",
   law: "스마트 안전보건법령",
   msds: "스마트 MSDS",
+  emergency: "119 신고",
+  dsafety: "D-안전회의",
   events: "이벤트 센터",
   reports: "리포트",
   settings: "설정",
@@ -103,6 +105,7 @@ const defaultConfig = () => ({
     },
   },
   detection: { confidence: 0.31, consecutiveFrames: 2, intervalMs: 1000 },
+  privacy: { faceMosaic: false },
 });
 
 const state = {
@@ -119,7 +122,11 @@ const state = {
   rtc: { relayConfigured: false, iceServerCount: 1 },
   stopWorkSeenIds: new Set(),
   stopWorkAlertInitialized: false,
+  emergencySeenIds: new Set(),
+  emergencyAlertInitialized: false,
   msds: { items: [], selectedId: null, query: "", stats: { count: 0, totalBytes: 0, softLimitBytes: 0 }, selectedFile: null },
+  emergency: { config: null, position: null, chartScale: 1 },
+  dSafety: { boards: [], selectedId: null, current: null, preview: null },
 };
 
 const realtime = {
@@ -178,6 +185,10 @@ const guard = {
     labels: null,
   },
   trainingStorage: { deviceBytes: 0, globalBytes: 0, deviceSamples: 0, globalSamples: 0 },
+  privacyCanvas: null,
+  privacyTempCanvas: null,
+  privacyStream: null,
+  privacyRaf: 0,
 };
 
 const callState = {
@@ -360,7 +371,7 @@ async function logout() {
 
 function goToPage(page) {
   if (!pageTitles[page]) return;
-  if (state.session?.role === "user" && !["guard", "law", "msds", "user-help"].includes(page)) page = "guard";
+  if (state.session?.role === "user" && !["guard", "emergency", "dsafety", "law", "msds", "user-help"].includes(page)) page = "guard";
   state.currentPage = page;
   $$(".page").forEach((section) => section.classList.toggle("active", section.id === `page-${page}`));
   $$(".nav-item").forEach((button) => button.classList.toggle("active", button.dataset.page === page));
@@ -374,6 +385,9 @@ function goToPage(page) {
     if (page === "events") loadEventRetentionSettings();
   }
   if (page === "msds") loadMsdsDocuments();
+  if (page === "emergency") loadEmergencyConfig();
+  if (page === "dsafety") loadDSafetyBoards();
+  if (page === "settings" && state.session?.role === "admin") loadPrivacyAdminEditor();
 }
 
 function updateClock() {
@@ -404,6 +418,7 @@ async function loadDashboard(silent = false) {
     state.devices = devices;
     state.events = events;
     checkAdminStopWorkAlerts(events);
+    checkAdminEmergencyAlerts(events);
     renderKpis();
     reconcileDeviceCards($("#overviewDevices"), false);
     reconcileDeviceCards($("#liveDevices"), true);
@@ -709,7 +724,7 @@ function renderBriefing() {
 
 function updateDeviceSelects() {
   const options = state.devices.map((device) => `<option value="${escapeHtml(device.id)}">${escapeHtml(device.name)} · ${escapeHtml(device.area)}</option>`).join("");
-  [$("#zoneDeviceSelect"), ...$$(".rule-device-select")].filter(Boolean).forEach((select) => {
+  [$("#zoneDeviceSelect"), $("#privacyDeviceSelect"), ...$$(".rule-device-select")].filter(Boolean).forEach((select) => {
     const before = select.value;
     select.innerHTML = options || `<option value="">장치 없음</option>`;
     if (state.devices.some((device) => device.id === before)) select.value = before;
@@ -1025,7 +1040,8 @@ async function createGuardVideoOffer(signal, adminPeerId) {
   closeGuardVideoPeer(adminPeerId);
   const pc = createPeerConnection();
   realtime.guardVideoPeers.set(adminPeerId, pc);
-  for (const track of guard.stream.getVideoTracks()) pc.addTrack(track, guard.stream);
+  const outboundStream = getGuardOutboundVideoStream();
+  for (const track of outboundStream.getVideoTracks()) pc.addTrack(track, outboundStream);
   const key = pcKey("video", getGuardDeviceId(), adminPeerId);
   pc.onicecandidate = (event) => {
     if (event.candidate) signal.send({ type: "ice", channel: "video", candidate: event.candidate, to: adminPeerId });
@@ -1379,6 +1395,9 @@ function loadGuardProfile() {
   $("#guardArea").value = saved.area || "안전 시연구역";
   $("#guardVoiceEnabled").checked = saved.voiceEnabled !== false;
   $("#guardZoneEnabled").checked = saved.zoneEnabled === true;
+  $("#guardFaceMosaic").checked = saved.faceMosaic === true;
+  guard.config.privacy ||= {};
+  guard.config.privacy.faceMosaic = saved.faceMosaic === true;
 }
 
 function saveGuardProfile() {
@@ -1389,6 +1408,7 @@ function saveGuardProfile() {
     cameraId: $("#guardCameraSelect").value,
     voiceEnabled: $("#guardVoiceEnabled").checked,
     zoneEnabled: $("#guardZoneEnabled").checked,
+    faceMosaic: $("#guardFaceMosaic").checked,
   }));
   toast("장치 정보를 저장했습니다.");
   if (guard.active) registerGuard();
@@ -1547,6 +1567,7 @@ async function stopGuard() {
   guard.inferenceFps = 0;
   guard.personInferenceFps = 0;
   guard.personDetections = [];
+  stopGuardPrivacyStream();
   guard.stream?.getTracks().forEach((track) => track.stop());
   guard.stream = null;
   $("#guardVideo").srcObject = null;
@@ -1603,7 +1624,7 @@ async function registerGuard() {
     site: $("#guardSite").value.trim() || "미지정 사업장",
     area: $("#guardArea").value.trim() || "미지정 구역",
   };
-  localStorage.setItem("ssg-guard-profile", JSON.stringify({ ...profile, cameraId: $("#guardCameraSelect").value, voiceEnabled: $("#guardVoiceEnabled").checked, zoneEnabled: $("#guardZoneEnabled").checked }));
+  localStorage.setItem("ssg-guard-profile", JSON.stringify({ ...profile, cameraId: $("#guardCameraSelect").value, voiceEnabled: $("#guardVoiceEnabled").checked, zoneEnabled: $("#guardZoneEnabled").checked, faceMosaic: $("#guardFaceMosaic")?.checked === true }));
   await api("/api/agents/register", { method: "POST", body: JSON.stringify({ deviceId: getGuardDeviceId(), ...profile, cameraLabel: $("#guardCameraSelect").selectedOptions[0]?.textContent || "브라우저 카메라", agentVersion: "browser-yolo11n-3.0", config: guard.config }) });
 }
 
@@ -1612,6 +1633,8 @@ async function fetchGuardConfig() {
   try {
     guard.config = await api(`/api/devices/${encodeURIComponent(getGuardDeviceId())}/config`);
     $("#guardVoiceEnabled").checked = guard.config.voice?.enabled !== false;
+    if ($("#guardFaceMosaic")) $("#guardFaceMosaic").checked = guard.config.privacy?.faceMosaic === true;
+    refreshGuardPrivacyTracks();
     if (!guardZoneEditor.dirty) syncGuardZoneEditorFromConfig();
     drawGuardOverlay(guard.detections, 0, 0);
   } catch { /* first registration race */ }
@@ -2316,6 +2339,116 @@ function pointInPolygon(point, polygon) {
   return inside;
 }
 
+function faceMosaicEnabled() {
+  return guard.config?.privacy?.faceMosaic === true;
+}
+
+function getFaceMosaicRegions() {
+  const regions = [];
+  const srcW = guard.latestSourceWidth || $("#guardVideo")?.videoWidth || 0;
+  const srcH = guard.latestSourceHeight || $("#guardVideo")?.videoHeight || 0;
+  if (!srcW || !srcH) return regions;
+  for (const worker of guard.latestAssessments || []) {
+    const box = worker.displayBox || worker.anchor;
+    if (box?.width > 2 && box?.height > 2) regions.push({ x: box.x, y: box.y, width: box.width, height: box.height });
+  }
+  if (!regions.length) {
+    for (const person of guard.personDetections || []) {
+      regions.push({ x: person.x + person.width * 0.18, y: Math.max(0, person.y - person.height * 0.03), width: person.width * 0.64, height: person.height * 0.42 });
+    }
+  }
+  return regions;
+}
+
+function drawPixelatedRegion(ctx, video, sourceBox, destScaleX = 1, destScaleY = 1) {
+  if (!video?.videoWidth || !sourceBox?.width || !sourceBox?.height) return;
+  guard.privacyTempCanvas ||= document.createElement("canvas");
+  const temp = guard.privacyTempCanvas;
+  const sx = Math.max(0, sourceBox.x), sy = Math.max(0, sourceBox.y);
+  const sw = Math.min(video.videoWidth - sx, sourceBox.width), sh = Math.min(video.videoHeight - sy, sourceBox.height);
+  if (sw <= 1 || sh <= 1) return;
+  const pixel = Math.max(8, Math.min(22, Math.round(Math.min(sw, sh) / 14)));
+  temp.width = Math.max(4, Math.round(sw / pixel));
+  temp.height = Math.max(4, Math.round(sh / pixel));
+  const tctx = temp.getContext("2d");
+  tctx.imageSmoothingEnabled = true;
+  tctx.clearRect(0, 0, temp.width, temp.height);
+  tctx.drawImage(video, sx, sy, sw, sh, 0, 0, temp.width, temp.height);
+  ctx.save();
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(temp, 0, 0, temp.width, temp.height, sx * destScaleX, sy * destScaleY, sw * destScaleX, sh * destScaleY);
+  ctx.restore();
+}
+
+function drawFaceMosaicOverlay(ctx, scaleX, scaleY) {
+  if (!faceMosaicEnabled()) return;
+  const video = $("#guardVideo");
+  for (const region of getFaceMosaicRegions()) drawPixelatedRegion(ctx, video, region, scaleX, scaleY);
+}
+
+function ensureGuardPrivacyStream() {
+  if (!faceMosaicEnabled() || !guard.active) return guard.stream;
+  const video = $("#guardVideo");
+  if (!video?.videoWidth || typeof HTMLCanvasElement === "undefined") return guard.stream;
+  guard.privacyCanvas ||= document.createElement("canvas");
+  const canvas = guard.privacyCanvas;
+  if (!canvas.captureStream) return guard.stream;
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  if (!guard.privacyStream) guard.privacyStream = canvas.captureStream(isMobile() ? 12 : 18);
+  if (!guard.privacyRaf) {
+    const loop = () => {
+      guard.privacyRaf = 0;
+      if (!guard.active || !faceMosaicEnabled()) return;
+      if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) { canvas.width = video.videoWidth; canvas.height = video.videoHeight; }
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      for (const region of getFaceMosaicRegions()) drawPixelatedRegion(ctx, video, region, 1, 1);
+      guard.privacyRaf = requestAnimationFrame(loop);
+    };
+    guard.privacyRaf = requestAnimationFrame(loop);
+  }
+  return guard.privacyStream || guard.stream;
+}
+
+function stopGuardPrivacyStream() {
+  if (guard.privacyRaf) cancelAnimationFrame(guard.privacyRaf);
+  guard.privacyRaf = 0;
+  guard.privacyStream?.getTracks().forEach((track) => track.stop());
+  guard.privacyStream = null;
+}
+
+function getGuardOutboundVideoStream() {
+  return faceMosaicEnabled() ? ensureGuardPrivacyStream() : guard.stream;
+}
+
+async function refreshGuardPrivacyTracks() {
+  if (!guard.active) return;
+  if (faceMosaicEnabled()) ensureGuardPrivacyStream();
+  const stream = getGuardOutboundVideoStream();
+  const track = stream?.getVideoTracks?.()[0];
+  if (!track) return;
+  for (const pc of realtime.guardVideoPeers.values()) {
+    const sender = pc.getSenders().find((item) => item.track?.kind === "video");
+    if (sender) try { await sender.replaceTrack(track); } catch { /* reconnect will recover */ }
+  }
+  if (!faceMosaicEnabled()) stopGuardPrivacyStream();
+  drawGuardOverlay(guard.detections, guard.latestSourceWidth, guard.latestSourceHeight, [], guard.latestAssessments);
+}
+
+async function saveGuardPrivacySetting() {
+  const enabled = $("#guardFaceMosaic")?.checked === true;
+  guard.config.privacy ||= {};
+  guard.config.privacy.faceMosaic = enabled;
+  const saved = JSON.parse(localStorage.getItem("ssg-guard-profile") || "{}");
+  localStorage.setItem("ssg-guard-profile", JSON.stringify({ ...saved, faceMosaic: enabled }));
+  await refreshGuardPrivacyTracks();
+  if (guard.active) {
+    try { await api("/api/guard/privacy", { method: "PUT", body: JSON.stringify({ deviceId: getGuardDeviceId(), faceMosaic: enabled }) }); } catch (error) { toast(`비식별화 설정 저장 실패: ${error.message}`); }
+  }
+  toast(enabled ? "얼굴 비식별화 모자이크를 켰습니다." : "얼굴 비식별화를 껐습니다.");
+}
+
 function drawGuardOverlay(detections = [], sourceWidth = 0, sourceHeight = 0, zoneEntries = [], assessments = []) {
   const canvas = $("#guardOverlay");
   const ctx = canvas.getContext("2d");
@@ -2338,6 +2471,7 @@ function drawGuardOverlay(detections = [], sourceWidth = 0, sourceHeight = 0, zo
   if (!sourceWidth || !sourceHeight) return;
   const scaleX = canvas.width / sourceWidth;
   const scaleY = canvas.height / sourceHeight;
+  drawFaceMosaicOverlay(ctx, scaleX, scaleY);
 
   // Only draw non-PPE raw detections. PPE is rendered per worker as HAT/GOG/MASK tri-state.
   for (const item of detections) {
@@ -2485,7 +2619,8 @@ function chooseStopWorkMimeType() {
 
 function createStopWorkRecorder(onFinished) {
   if (!guard.stream || !("MediaRecorder" in window)) return null;
-  const videoTracks = guard.stream.getVideoTracks().filter((track) => track.readyState === "live");
+  const recordingSource = guard.config.privacy?.faceMosaic === true ? getGuardOutboundVideoStream() : guard.stream;
+  const videoTracks = recordingSource.getVideoTracks().filter((track) => track.readyState === "live");
   if (!videoTracks.length) return null;
   const stream = new MediaStream(videoTracks.map((track) => track.clone()));
   const mimeType = chooseStopWorkMimeType();
@@ -2746,9 +2881,12 @@ function eventMessageHtml(event) {
   if (event.snapshotUrl) links.push(`<a href="${escapeHtml(event.snapshotUrl)}" target="_blank" rel="noopener">현장 사진</a>`);
   const hasStopWorkVideo = Boolean(event.metadata?.beforeClipUrl || event.metadata?.afterClipUrl || event.metadata?.clipUrl);
   if (hasStopWorkVideo) links.push(`<button class="event-video-button" type="button" data-event-stop-video="${escapeHtml(event.id)}">전후 영상</button>`);
+  if (event.type === "EMERGENCY_119" && event.metadata?.mapUrl) links.push(`<a href="${escapeHtml(event.metadata.mapUrl)}" target="_blank" rel="noopener">GPS 지도</a>`);
   const details = event.type === "STOP_WORK_REQUEST"
     ? `<small class="stop-work-event-detail">발동자 ${escapeHtml(event.metadata?.reporterName || "-")} · ${escapeHtml(event.metadata?.reporterContact || "연락처 미입력")}</small>`
-    : "";
+    : event.type === "EMERGENCY_119"
+      ? `<small class="stop-work-event-detail">신고자 ${escapeHtml(event.metadata?.reporterName || "-")} · GPS ${escapeHtml(String(event.metadata?.latitude ?? "-"))}, ${escapeHtml(String(event.metadata?.longitude ?? "-"))}</small>`
+      : "";
   return `<div class="event-message-cell"><b>${escapeHtml(event.message)}</b>${details}${links.length ? `<div class="event-media-links">${links.join("")}</div>` : ""}</div>`;
 }
 
@@ -2767,6 +2905,34 @@ function checkAdminStopWorkAlerts(events = []) {
     state.stopWorkSeenIds.add(event.id);
     showAdminStopWorkAlert(event);
   }
+}
+
+function checkAdminEmergencyAlerts(events = []) {
+  if (state.session?.role !== "admin") return;
+  const emergencyEvents = events.filter((event) => event.type === "EMERGENCY_119");
+  if (!state.emergencyAlertInitialized) {
+    state.emergencyAlertInitialized = true;
+    emergencyEvents.forEach((event) => state.emergencySeenIds.add(event.id));
+    const latestOpen = emergencyEvents.find((event) => !event.acknowledged);
+    if (latestOpen) showAdminEmergencyAlert(latestOpen);
+    return;
+  }
+  for (const event of [...emergencyEvents].reverse()) {
+    if (state.emergencySeenIds.has(event.id)) continue;
+    state.emergencySeenIds.add(event.id);
+    showAdminEmergencyAlert(event);
+  }
+}
+
+function showAdminEmergencyAlert(event) {
+  $(".admin-emergency-alert")?.remove();
+  const card = document.createElement("aside");
+  card.className = "admin-stop-work-alert admin-emergency-alert";
+  card.innerHTML = `<div class="admin-stop-work-alert-icon">119</div><div class="admin-stop-work-alert-copy"><span>긴급 · 119 GPS 비상신고</span><b>${escapeHtml(event.deviceName || event.deviceId)}</b><p>${escapeHtml(event.metadata?.note || event.message || "비상상황")}</p><small>GPS ${escapeHtml(String(event.metadata?.latitude ?? "-"))}, ${escapeHtml(String(event.metadata?.longitude ?? "-"))}</small></div><div class="admin-stop-work-alert-actions">${event.metadata?.mapUrl ? `<button type="button" data-emergency-map>GPS 지도</button>` : ""}<button type="button" data-emergency-open>이벤트 확인</button></div>`;
+  document.body.append(card);
+  $("[data-emergency-map]", card)?.addEventListener("click", () => window.open(event.metadata.mapUrl, "_blank", "noopener"));
+  $("[data-emergency-open]", card)?.addEventListener("click", () => { card.remove(); goToPage("events"); if ($("#eventCategoryFilter")) $("#eventCategoryFilter").value = "비상신고"; renderEventTable(); });
+  setTimeout(() => { if (card.isConnected) card.remove(); }, 30000);
 }
 
 function showAdminStopWorkAlert(event) {
@@ -3505,6 +3671,481 @@ function renderReports() {
 }
 
 
+/* ---------- Emergency 119 / GPS / editable contacts ---------- */
+
+function phoneHref(phone) {
+  return `tel:${String(phone || "").replace(/[^0-9+*#]/g, "")}`;
+}
+
+function emergencySavedSite() {
+  try {
+    const saved = JSON.parse(localStorage.getItem("ssg-guard-profile") || "{}");
+    return String(saved.site || $("#guardSite")?.value || "").trim();
+  } catch { return String($("#guardSite")?.value || "").trim(); }
+}
+
+function chooseEmergencyCallId(config) {
+  const options = Array.isArray(config?.callOptions) ? config.callOptions : [];
+  if (!options.length) return "";
+  if (state.emergency.selectedCallId && options.some((item) => item.id === state.emergency.selectedCallId)) return state.emergency.selectedCallId;
+  const site = emergencySavedSite().replace(/\s+/g, "");
+  if (site.includes("광양")) return options.find((item) => `${item.site} ${item.label}`.includes("광양"))?.id || config.defaultCallId || options[0].id;
+  if (site.includes("포항")) return options.find((item) => `${item.site} ${item.label}`.includes("포항"))?.id || config.defaultCallId || options[0].id;
+  return config.defaultCallId || options[0].id;
+}
+
+function selectedEmergencyCall() {
+  const config = state.emergency.config || {};
+  const options = Array.isArray(config.callOptions) ? config.callOptions : [];
+  const id = state.emergency.selectedCallId || chooseEmergencyCallId(config);
+  return options.find((item) => item.id === id) || options[0] || { id: "", site: "공통", label: "119", phone: "119" };
+}
+
+function updateEmergencyCallUi(refreshEditor = false) {
+  const config = state.emergency.config || {};
+  const options = Array.isArray(config.callOptions) ? config.callOptions : [];
+  const select = $("#emergencyCallSelect");
+  if (select) {
+    if (!state.emergency.selectedCallId) state.emergency.selectedCallId = chooseEmergencyCallId(config);
+    select.innerHTML = options.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.label)} · ${escapeHtml(item.phone)}</option>`).join("");
+    select.value = state.emergency.selectedCallId || options[0]?.id || "";
+  }
+  const call = selectedEmergencyCall();
+  const button = $("#emergencyCallButton");
+  if (button) button.href = phoneHref(call.phone || "119");
+  if ($("#emergencyCallHeroNumber")) $("#emergencyCallHeroNumber").textContent = call.phone || "119";
+  if ($("#emergencyCallHeroLabel")) $("#emergencyCallHeroLabel").textContent = call.label || "119 전화 연결";
+  if ($("#emergencyCallCurrent")) $("#emergencyCallCurrent").textContent = `${call.label || "비상전화"} · ${call.phone || "번호 미등록"}`;
+  if (refreshEditor && state.session?.role === "admin") renderEmergencyCallEditor();
+}
+
+function renderEmergencyCallEditor() {
+  const box = $("#emergencyCallEditor");
+  if (!box) return;
+  const config = state.emergency.config || { callOptions: [] };
+  const options = Array.isArray(config.callOptions) ? config.callOptions : [];
+  box.innerHTML = options.map((item, index) => `<div class="emergency-call-edit-row" data-call-index="${index}"><label class="call-default-radio" title="기본 전화"><input type="radio" name="defaultEmergencyCall" value="${escapeHtml(item.id)}" ${item.id === config.defaultCallId ? "checked" : ""} /><span>기본</span></label><input data-call-field="site" value="${escapeHtml(item.site || "")}" placeholder="사업장/지역" /><input data-call-field="label" value="${escapeHtml(item.label || "")}" placeholder="표시명 (예: 광양제철소 119)" /><input data-call-field="phone" value="${escapeHtml(item.phone || "")}" inputmode="tel" placeholder="전화번호" /><button class="danger-button contact-row-delete" type="button" data-call-delete="${index}" aria-label="삭제">×</button></div>`).join("");
+  $$('[data-call-delete]', box).forEach((button) => button.addEventListener("click", () => {
+    const index = Number(button.dataset.callDelete);
+    const removed = state.emergency.config.callOptions[index];
+    state.emergency.config.callOptions.splice(index, 1);
+    if (removed?.id === state.emergency.config.defaultCallId) state.emergency.config.defaultCallId = state.emergency.config.callOptions[0]?.id || "";
+    if (removed?.id === state.emergency.selectedCallId) state.emergency.selectedCallId = state.emergency.config.defaultCallId || state.emergency.config.callOptions[0]?.id || "";
+    updateEmergencyCallUi(true);
+  }));
+}
+
+function addEmergencyCallRow() {
+  state.emergency.config ||= { contacts: [], callOptions: [], defaultCallId: "", chartUrl: null };
+  state.emergency.config.callOptions ||= [];
+  const id = uuid("call");
+  state.emergency.config.callOptions.push({ id, site: "공통", label: "새 비상전화", phone: "" });
+  if (!state.emergency.config.defaultCallId) state.emergency.config.defaultCallId = id;
+  renderEmergencyCallEditor();
+}
+
+async function saveEmergencyCallOptions() {
+  const current = state.emergency.config || { contacts: [] };
+  const callOptions = $$('[data-call-index]', $("#emergencyCallEditor")).map((row) => {
+    const index = Number(row.dataset.callIndex);
+    const value = (field) => $(`[data-call-field="${field}"]`, row)?.value?.trim() || "";
+    return {
+      id: current.callOptions?.[index]?.id || uuid("call"),
+      site: value("site") || "공통",
+      label: value("label") || "비상전화",
+      phone: value("phone"),
+    };
+  }).filter((item) => item.label && item.phone);
+  if (!callOptions.length) return toast("비상전화 번호를 1개 이상 등록해주세요.");
+  const checked = $('input[name="defaultEmergencyCall"]:checked', $("#emergencyCallEditor"));
+  const defaultCallId = checked?.value && callOptions.some((item) => item.id === checked.value) ? checked.value : callOptions[0].id;
+  try {
+    const data = await api("/api/emergency/config", { method: "PUT", body: JSON.stringify({ callOptions, defaultCallId }) });
+    state.emergency.config = data;
+    state.emergency.selectedCallId = chooseEmergencyCallId(data);
+    updateEmergencyCallUi(true);
+    toast("119·비상전화 설정을 저장했습니다.");
+  } catch (error) { toast(error.message); }
+}
+
+function emergencyContactRegions(contacts) {
+  const preferred = ["공통", "포항", "광양", "세종", "구미"];
+  const found = [...new Set((contacts || []).map((item) => item.region || "공통"))];
+  return [...preferred.filter((r) => found.includes(r)), ...found.filter((r) => !preferred.includes(r)).sort()];
+}
+
+function renderEmergencyRegionFilter(contacts) {
+  const select = $("#emergencyRegionFilter");
+  if (!select) return;
+  const current = select.value || state.emergency.regionFilter || "";
+  const regions = emergencyContactRegions(contacts);
+  select.innerHTML = `<option value="">전체 지역</option>${regions.map((region) => `<option value="${escapeHtml(region)}">${escapeHtml(region)}</option>`).join("")}`;
+  if (["", ...regions].includes(current)) select.value = current;
+}
+
+function renderEmergencyContacts() {
+  const config = state.emergency.config || { contacts: [] };
+  const contacts = Array.isArray(config.contacts) ? config.contacts : [];
+  renderEmergencyRegionFilter(contacts);
+  const selectedRegion = $("#emergencyRegionFilter")?.value || state.emergency.regionFilter || "";
+  state.emergency.regionFilter = selectedRegion;
+  const visible = selectedRegion ? contacts.filter((item) => (item.region || "공통") === selectedRegion) : contacts;
+  const list = $("#emergencyContactList");
+  if (list) list.innerHTML = visible.map((item) => {
+    const department = item.department || item.name || "연락처";
+    const person = item.name && item.name !== department ? item.name : "";
+    const meta = [item.region || "공통", item.type || "비상"].filter(Boolean).join(" · ");
+    const sub = [person ? `이름: ${person}` : "", item.note || ""].filter(Boolean).join(" · ");
+    return `<article class="emergency-contact-item"><span>${escapeHtml(meta)}</span><div><b>${escapeHtml(department)}</b><small>${escapeHtml(sub)}</small></div>${item.phone ? `<a href="${phoneHref(item.phone)}"><strong>${escapeHtml(item.phone)}</strong><small>전화</small></a>` : `<em>번호 미등록</em>`}</article>`;
+  }).join("") || `<div class="law-empty-state"><span>☎</span><h3>해당 지역 연락처가 없습니다</h3><p>관리자가 부서·기관·이름·연락처를 추가할 수 있습니다.</p></div>`;
+  if ($("#emergencyContactCount")) $("#emergencyContactCount").textContent = selectedRegion ? `${visible.length}개 / 전체 ${contacts.length}개` : `${contacts.length}개`;
+}
+
+function renderEmergencyContactEditor() {
+  const box = $("#emergencyContactEditor");
+  if (!box) return;
+  const contacts = state.emergency.config?.contacts || [];
+  box.innerHTML = contacts.map((item, index) => `<div class="emergency-contact-edit-row" data-contact-index="${index}"><input data-contact-field="region" value="${escapeHtml(item.region || "공통")}" placeholder="지역" /><input data-contact-field="type" value="${escapeHtml(item.type || "")}" placeholder="구분" /><input data-contact-field="department" value="${escapeHtml(item.department || "")}" placeholder="부서/기관" /><input data-contact-field="name" value="${escapeHtml(item.name || "")}" placeholder="이름(선택)" /><input data-contact-field="phone" value="${escapeHtml(item.phone || "")}" inputmode="tel" placeholder="연락처" /><input data-contact-field="note" value="${escapeHtml(item.note || "")}" placeholder="비고" /><button class="danger-button contact-row-delete" type="button" data-contact-delete="${index}" aria-label="삭제">×</button></div>`).join("");
+  $$('[data-contact-delete]', box).forEach((button) => button.addEventListener("click", () => {
+    state.emergency.config.contacts.splice(Number(button.dataset.contactDelete), 1);
+    renderEmergencyContacts();
+    renderEmergencyContactEditor();
+  }));
+}
+
+function addEmergencyContactRow() {
+  state.emergency.config ||= { contacts: [], callOptions: [], chartUrl: null };
+  state.emergency.config.contacts ||= [];
+  state.emergency.config.contacts.push({ id: uuid("contact"), region: "공통", type: "기타", department: "", name: "", phone: "", note: "" });
+  renderEmergencyContacts();
+  renderEmergencyContactEditor();
+  requestAnimationFrame(() => $("#emergencyContactEditor")?.lastElementChild?.scrollIntoView({ behavior: "smooth", block: "nearest" }));
+}
+
+async function saveEmergencyContacts() {
+  const current = state.emergency.config || { contacts: [] };
+  const contacts = $$('[data-contact-index]', $("#emergencyContactEditor")).map((row) => {
+    const index = Number(row.dataset.contactIndex);
+    const value = (field) => $(`[data-contact-field="${field}"]`, row)?.value?.trim() || "";
+    return {
+      id: current.contacts?.[index]?.id || uuid("contact"),
+      region: value("region") || "공통",
+      type: value("type") || "기타",
+      department: value("department"),
+      name: value("name"),
+      phone: value("phone"),
+      note: value("note"),
+    };
+  }).filter((item) => item.department || item.name || item.phone);
+  try {
+    const data = await api("/api/emergency/config", { method: "PUT", body: JSON.stringify({ contacts }) });
+    state.emergency.config = data;
+    renderEmergencyContacts();
+    renderEmergencyContactEditor();
+    renderEmergencyChart();
+    updateEmergencyCallUi(true);
+    toast("비상연락망을 저장했습니다.");
+  } catch (error) { toast(error.message); }
+}
+
+function renderEmergencyChart() {
+  const img = $("#emergencyChartImage");
+  const empty = $("#emergencyChartEmpty");
+  const link = $("#emergencyChartDownload");
+  const url = state.emergency.config?.chartUrl;
+  if (url) {
+    img.src = `${url}?v=${Date.now()}`;
+    img.hidden = false;
+    empty.hidden = true;
+    link.href = url;
+    link.hidden = false;
+  } else {
+    img.removeAttribute("src");
+    img.hidden = true;
+    empty.hidden = false;
+    link.hidden = true;
+  }
+  applyEmergencyChartZoom();
+}
+
+async function loadEmergencyConfig() {
+  try {
+    state.emergency.config = await api("/api/emergency/config");
+    if (!state.emergency.selectedCallId) state.emergency.selectedCallId = chooseEmergencyCallId(state.emergency.config);
+    updateEmergencyCallUi(true);
+    renderEmergencyContacts();
+    if (state.session?.role === "admin") renderEmergencyContactEditor();
+    renderEmergencyChart();
+  } catch (error) { toast(`비상대응 정보 조회 실패: ${error.message}`); }
+}
+
+function applyEmergencyChartZoom() {
+  const box = $("#emergencyChartDocument");
+  if (!box) return;
+  const scale = Math.max(.25, Math.min(3, Number(state.emergency.chartScale || 1)));
+  state.emergency.chartScale = scale;
+  box.style.transform = `scale(${scale})`;
+  box.style.marginBottom = `${Math.max(0, box.offsetHeight * (scale - 1))}px`;
+  $("#emergencyChartZoomRate").textContent = `${Math.round(scale * 100)}%`;
+}
+
+function fitEmergencyChart() {
+  const viewport = $("#emergencyChartViewport");
+  const img = $("#emergencyChartImage");
+  if (!viewport || !img || img.hidden) return;
+  const natural = img.naturalWidth || 1536;
+  state.emergency.chartScale = Math.min(1, Math.max(.25, (viewport.clientWidth - 24) / natural));
+  applyEmergencyChartZoom();
+}
+
+async function compressEmergencyChart(file) {
+  if (!file?.type?.startsWith("image/")) throw new Error("PNG/JPG/WEBP 이미지를 선택해주세요.");
+  const bitmap = await createImageBitmap(file);
+  const maxW = 1800, maxH = 2400;
+  const scale = Math.min(1, maxW / bitmap.width, maxH / bitmap.height);
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+  canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+  canvas.getContext("2d").drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  let quality = .86, blob = null;
+  for (let i = 0; i < 5; i += 1) {
+    blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", quality));
+    if (blob && blob.size <= 1_400_000) break;
+    quality -= .12;
+  }
+  bitmap.close?.();
+  if (!blob || blob.size > 1_450_000) throw new Error("이미지를 1.45MB 이하로 압축하지 못했습니다. 원본 해상도를 조금 낮춰주세요.");
+  return blob;
+}
+
+async function uploadEmergencyChart(file) {
+  if (!file) return;
+  try {
+    const blob = await compressEmergencyChart(file);
+    state.emergency.config = await api("/api/emergency/chart", { method: "POST", headers: { "content-type": blob.type || "image/jpeg" }, body: blob });
+    renderEmergencyChart();
+    updateEmergencyCallUi(false);
+    renderEmergencyContacts();
+    toast("비상상황 보고체계도를 등록했습니다.");
+  } catch (error) { toast(error.message, 6000); }
+  finally { $("#emergencyChartFile").value = ""; }
+}
+
+function getEmergencyPosition() {
+  if (!navigator.geolocation) return Promise.reject(new Error("이 브라우저는 GPS 위치 기능을 지원하지 않습니다."));
+  $("#gpsStatus").textContent = "GPS 확인 중";
+  return new Promise((resolve, reject) => navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 }));
+}
+
+async function updateEmergencyPosition() {
+  try {
+    const pos = await getEmergencyPosition();
+    state.emergency.position = { latitude: pos.coords.latitude, longitude: pos.coords.longitude, accuracy: pos.coords.accuracy, timestamp: pos.timestamp };
+    $("#gpsStatus").textContent = "위치 확인됨";
+    $("#gpsLat").textContent = pos.coords.latitude.toFixed(6);
+    $("#gpsLng").textContent = pos.coords.longitude.toFixed(6);
+    $("#gpsAccuracy").textContent = `약 ${Math.round(pos.coords.accuracy)}m`;
+    $("#gpsDescription").textContent = "현재 위치를 관리자에게 전송하거나 지도에서 확인할 수 있습니다.";
+    $("#openEmergencyMap").disabled = false;
+    $("#copyEmergencyCoordinates").disabled = false;
+    return state.emergency.position;
+  } catch (error) {
+    const map = { 1: "위치 권한이 거부되었습니다.", 2: "현재 위치를 확인할 수 없습니다.", 3: "GPS 위치 확인 시간이 초과되었습니다." };
+    $("#gpsStatus").textContent = "위치 확인 실패";
+    toast(map[error.code] || error.message || "GPS 위치 확인 실패", 5500);
+    throw error;
+  }
+}
+
+function emergencyMapUrl() {
+  const p = state.emergency.position;
+  return p ? `https://www.google.com/maps?q=${p.latitude},${p.longitude}` : "";
+}
+
+async function sendEmergencyLocationToAdmin() {
+  let p = state.emergency.position;
+  if (!p) try { p = await updateEmergencyPosition(); } catch { return; }
+  const button = $("#sendEmergencyLocation");
+  button.disabled = true;
+  button.textContent = "전송 중...";
+  try {
+    await api("/api/emergency/report", { method: "POST", body: JSON.stringify({ deviceId: getGuardDeviceId(), reporterName: $("#emergencyReporterName").value.trim(), reporterContact: $("#emergencyReporterContact").value.trim(), note: $("#emergencyNote").value.trim(), latitude: p.latitude, longitude: p.longitude, accuracy: p.accuracy, occurredAt: new Date().toISOString() }) });
+    toast("GPS 위치와 비상상황을 관리자에게 전송했습니다.", 6000);
+  } catch (error) { toast(`비상 위치 전송 실패: ${error.message}`, 6000); }
+  finally { button.disabled = false; button.textContent = "관리자에게 위치 전송"; }
+}
+
+/* ---------- D-safety meeting ---------- */
+
+function parseDSafetyExcelRow(text) {
+  const fields = [];
+  let cur = "", inQuote = false;
+  for (let i = 0; i < text.length; i += 1) {
+    const c = text[i];
+    if (c === '"') {
+      if (inQuote && text[i + 1] === '"') { cur += '"'; i += 1; }
+      else inQuote = !inQuote;
+    } else if (c === "\t" && !inQuote) { fields.push(cur); cur = ""; }
+    else cur += c;
+  }
+  fields.push(cur);
+  return fields;
+}
+
+function findDSafetyDataRow(fullText) {
+  const rows = [];
+  let cur = "", inQuote = false;
+  for (let i = 0; i < fullText.length; i += 1) {
+    const c = fullText[i];
+    if (c === '"') { inQuote = !inQuote; cur += c; }
+    else if ((c === "\n" || c === "\r") && !inQuote) {
+      if (cur.trim()) rows.push(cur); cur = "";
+      if (c === "\r" && fullText[i + 1] === "\n") i += 1;
+    } else cur += c;
+  }
+  if (cur.trim()) rows.push(cur);
+  for (const row of rows) if (/^(?:\d{1,2}\/\d{1,2}|\d{4}[-/.]\d{1,2}[-/.]\d{1,2})/.test((row.split("\t")[0] || "").trim())) return row;
+  return rows[rows.length - 1] || "";
+}
+
+function splitDSafetyNumbered(text) {
+  if (!text) return [];
+  const items = []; let current = null;
+  for (const line of String(text).split(/\r?\n/)) {
+    const trimmed = line.trim(); if (!trimmed) continue;
+    const m = trimmed.match(/^(\d+(?:-\d+)?)\.\s*(.*)/);
+    const star = trimmed.match(/^\*\s*(.*)/);
+    if (m) { if (current) items.push(current); current = { no: m[1], text: m[2] }; }
+    else if (star) { if (current) items.push(current); current = { no: "*", text: star[1] }; }
+    else if (current) current.text += ` ${trimmed}`;
+    else current = { no: "-", text: trimmed };
+  }
+  if (current) items.push(current);
+  return items;
+}
+
+function parseDSafetyExcel(raw) {
+  const row = findDSafetyDataRow(raw);
+  const f = parseDSafetyExcelRow(row);
+  if (f.length < 16) throw new Error("D-안전회의 엑셀 행의 열 수가 부족합니다. 엑셀에서 전체 행을 복사해주세요.");
+  const risks = splitDSafetyNumbered(f[14] || "");
+  const actions = splitDSafetyNumbered(f[15] || "");
+  const nos = [...new Set([...risks.map((x) => x.no), ...actions.map((x) => x.no)])];
+  const plant = (f[4] || "").trim(), place = (f[6] || "").trim();
+  return {
+    meetingDate: f[0] || "", workTime: f[9] || "", location: plant && place && plant.replace(/\s+/g, "") !== place.replace(/\s+/g, "") ? `${plant} / ${place}` : (plant || place),
+    jobName: f[7] || "", peopleCount: parseInt(f[8], 10) || 1, contractor: f[10] || "", workManager: f[12] || "", contractorManager: f[13] || "",
+    monitorDept: (f[f.length - 3] || "").trim(), monitorName: (f[f.length - 2] || "").trim(), cctv: (f[f.length - 1] || "").trim(),
+    rows: nos.map((no) => ({ no, risk: risks.find((x) => x.no === no)?.text || "", action: actions.find((x) => x.no === no)?.text || "" })), rawText: raw,
+  };
+}
+
+function renderDSafetyBoard(board) {
+  const viewer = $("#dSafetyViewer");
+  if (!viewer) return;
+  if (!board) {
+    viewer.innerHTML = `<div class="law-empty-state"><span>☷</span><h3>D-안전회의 자료가 없습니다</h3><p>관리자가 회의 결과를 변환·저장하면 현장에 표시됩니다.</p></div>`;
+    $("#dSafetyOpinionList").innerHTML = "";
+    return;
+  }
+  const rows = Array.isArray(board.rows) ? board.rows : [];
+  viewer.innerHTML = `<section class="panel dsafety-board-card"><div class="dsafety-board-title"><div><p class="eyebrow">D-SAFETY COMMUNICATION BOARD</p><h3>${escapeHtml(board.meetingDate || "D-안전회의")} · ${escapeHtml(board.location || "작업장")}</h3></div><span>${escapeHtml(String(board.peopleCount || 0))}명</span></div><div class="dsafety-info-grid"><div><span>작업시간</span><b>${escapeHtml(board.workTime || "-")}</b></div><div><span>작업명</span><b>${escapeHtml(board.jobName || "-")}</b></div><div><span>수행사</span><b>${escapeHtml(board.contractor || "-")}</b></div><div><span>작업담당자</span><b>${escapeHtml(board.workManager || "-")}</b></div><div><span>수행사 담당자</span><b>${escapeHtml(board.contractorManager || "-")}</b></div><div><span>안전 Monitor</span><b>${escapeHtml(board.monitorName || "-")}${board.monitorDept ? ` (${escapeHtml(board.monitorDept)})` : ""}</b></div></div><div class="dsafety-risk-table-wrap"><table class="data-table dsafety-risk-table"><thead><tr><th>No.</th><th>⚠ 잠재위험</th><th>✓ 안전 조치사항</th></tr></thead><tbody>${rows.map((row) => `<tr><td>${escapeHtml(row.no)}</td><td>${escapeHtml(row.risk)}</td><td>${escapeHtml(row.action)}</td></tr>`).join("") || `<tr><td colspan="3">등록된 위험요인이 없습니다.</td></tr>`}</tbody></table></div></section>`;
+  renderDSafetyOpinions(board.opinions || []);
+}
+
+function renderDSafetyOpinions(opinions = []) {
+  const list = $("#dSafetyOpinionList");
+  if (!list) return;
+  list.innerHTML = opinions.length ? `<div class="divider-label">접수된 종사자 의견 ${opinions.length}건</div>${opinions.map((item) => `<article class="dsafety-opinion-item"><div><b>${escapeHtml(item.name)} · ${escapeHtml(item.affiliation)}</b><time>${formatDate(item.createdAt)}</time></div><p>${escapeHtml(item.content)}</p></article>`).join("")}` : `<div class="dsafety-opinion-empty">아직 등록된 종사자 의견이 없습니다.</div>`;
+}
+
+function renderDSafetySelect() {
+  const select = $("#dSafetyBoardSelect");
+  const boards = state.dSafety.boards || [];
+  select.innerHTML = boards.map((board) => `<option value="${escapeHtml(board.id)}">${escapeHtml(board.meetingDate || "날짜 미입력")} · ${escapeHtml(board.location || board.jobName || "D-안전회의")}</option>`).join("") || `<option value="">등록된 D-안전회의 없음</option>`;
+  if (boards.some((item) => item.id === state.dSafety.selectedId)) select.value = state.dSafety.selectedId;
+  else if (boards[0]) { state.dSafety.selectedId = boards[0].id; select.value = boards[0].id; }
+}
+
+async function loadDSafetyBoards() {
+  try {
+    state.dSafety.boards = await api("/api/d-safety/boards");
+    renderDSafetySelect();
+    if (state.dSafety.selectedId) await openDSafetyBoard(state.dSafety.selectedId);
+    else renderDSafetyBoard(null);
+  } catch (error) { toast(`D-안전회의 조회 실패: ${error.message}`); }
+}
+
+async function openDSafetyBoard(id) {
+  if (!id) return renderDSafetyBoard(null);
+  state.dSafety.selectedId = id;
+  try { state.dSafety.current = await api(`/api/d-safety/boards/${encodeURIComponent(id)}`); renderDSafetyBoard(state.dSafety.current); }
+  catch (error) { toast(error.message); }
+}
+
+function previewDSafetyExcel() {
+  try {
+    state.dSafety.preview = parseDSafetyExcel($("#dSafetyExcelInput").value);
+    renderDSafetyBoard({ ...state.dSafety.preview, id: "preview", opinions: [] });
+    $("#dSafetyImportStatus").textContent = `변환 완료 · 위험/조치 ${state.dSafety.preview.rows.length}개 · 작업인원 ${state.dSafety.preview.peopleCount}명`;
+    $("#saveDSafetyBoard").disabled = false;
+  } catch (error) { state.dSafety.preview = null; $("#saveDSafetyBoard").disabled = true; toast(error.message, 6000); }
+}
+
+async function saveDSafetyBoard() {
+  if (!state.dSafety.preview) return toast("먼저 엑셀 데이터를 변환해주세요.");
+  try {
+    const saved = await api("/api/d-safety/boards", { method: "POST", body: JSON.stringify(state.dSafety.preview) });
+    toast("D-안전회의 소통보드를 저장했습니다.");
+    state.dSafety.preview = null;
+    $("#saveDSafetyBoard").disabled = true;
+    $("#dSafetyExcelInput").value = "";
+    await loadDSafetyBoards();
+    state.dSafety.selectedId = saved.id;
+    renderDSafetySelect();
+    await openDSafetyBoard(saved.id);
+  } catch (error) { toast(error.message); }
+}
+
+async function submitDSafetyOpinion() {
+  const id = state.dSafety.selectedId;
+  if (!id) return toast("의견을 등록할 D-안전회의를 먼저 선택해주세요.");
+  const affiliation = $("#dSafetyOpinionDept").value.trim();
+  const name = $("#dSafetyOpinionName").value.trim();
+  const content = $("#dSafetyOpinionContent").value.trim();
+  if (!affiliation || !name || !content) return toast("소속, 이름, 의견을 모두 입력해주세요.");
+  try {
+    await api(`/api/d-safety/boards/${encodeURIComponent(id)}/opinions`, { method: "POST", body: JSON.stringify({ affiliation, name, content }) });
+    localStorage.setItem("poseidon-dsafety-opinion-user", JSON.stringify({ affiliation, name }));
+    $("#dSafetyOpinionContent").value = "";
+    toast("종사자 의견이 접수되었습니다.");
+    await openDSafetyBoard(id);
+  } catch (error) { toast(error.message); }
+}
+
+async function deleteDSafetyBoard() {
+  if (!state.dSafety.selectedId || !confirm("선택한 D-안전회의와 연결된 종사자 의견을 삭제할까요?")) return;
+  try { await api(`/api/d-safety/boards/${encodeURIComponent(state.dSafety.selectedId)}`, { method: "DELETE" }); state.dSafety.selectedId = null; await loadDSafetyBoards(); toast("D-안전회의 자료를 삭제했습니다."); }
+  catch (error) { toast(error.message); }
+}
+
+async function loadPrivacyAdminEditor() {
+  const select = $("#privacyDeviceSelect");
+  if (!select) return;
+  if (!select.value && state.devices[0]) select.value = state.devices[0].id;
+  const id = select.value;
+  if (!id) { $("#adminFaceMosaic").checked = false; return; }
+  try { const config = await api(`/api/devices/${encodeURIComponent(id)}/config`); $("#adminFaceMosaic").checked = config.privacy?.faceMosaic === true; }
+  catch { /* noop */ }
+}
+
+async function saveAdminPrivacy() {
+  const deviceId = $("#privacyDeviceSelect")?.value;
+  if (!deviceId) return toast("대상 장치를 선택해주세요.");
+  try { await api("/api/guard/privacy", { method: "PUT", body: JSON.stringify({ deviceId, faceMosaic: $("#adminFaceMosaic").checked }) }); toast("얼굴 비식별화 설정을 저장했습니다. 현장 장치에 최대 15초 내 반영됩니다."); }
+  catch (error) { toast(error.message); }
+}
+
 /* ---------- Smart MSDS library ---------- */
 
 function formatBytes(bytes) {
@@ -3760,6 +4401,29 @@ function bindEvents() {
   $("#msdsUploadForm")?.addEventListener("submit", uploadMsdsDocument);
   $("#msdsFileInput")?.addEventListener("change", (event) => handleMsdsFileSelection(event.target.files?.[0]));
   $("#msdsDeleteButton")?.addEventListener("click", deleteSelectedMsds);
+  $("#getEmergencyLocation")?.addEventListener("click", updateEmergencyPosition);
+  $("#sendEmergencyLocation")?.addEventListener("click", sendEmergencyLocationToAdmin);
+  $("#openEmergencyMap")?.addEventListener("click", () => { const url = emergencyMapUrl(); if (url) window.open(url, "_blank", "noopener"); });
+  $("#copyEmergencyCoordinates")?.addEventListener("click", async () => { const p = state.emergency.position; if (!p) return; try { await navigator.clipboard.writeText(`${p.latitude},${p.longitude}`); toast("GPS 좌표를 복사했습니다."); } catch { toast("좌표 복사에 실패했습니다."); } });
+  $("#emergencyCallSelect")?.addEventListener("change", (event) => { state.emergency.selectedCallId = event.target.value; updateEmergencyCallUi(); });
+  $("#emergencyRegionFilter")?.addEventListener("change", (event) => { state.emergency.regionFilter = event.target.value; renderEmergencyContacts(); });
+  $("#addEmergencyCall")?.addEventListener("click", addEmergencyCallRow);
+  $("#saveEmergencyCalls")?.addEventListener("click", saveEmergencyCallOptions);
+  $("#addEmergencyContact")?.addEventListener("click", addEmergencyContactRow);
+  $("#saveEmergencyContacts")?.addEventListener("click", saveEmergencyContacts);
+  $("#emergencyChartFile")?.addEventListener("change", (event) => uploadEmergencyChart(event.target.files?.[0]));
+  $("#emergencyChartZoomIn")?.addEventListener("click", () => { state.emergency.chartScale += .1; applyEmergencyChartZoom(); });
+  $("#emergencyChartZoomOut")?.addEventListener("click", () => { state.emergency.chartScale -= .1; applyEmergencyChartZoom(); });
+  $("#emergencyChartReset")?.addEventListener("click", () => { state.emergency.chartScale = 1; applyEmergencyChartZoom(); });
+  $("#emergencyChartFit")?.addEventListener("click", fitEmergencyChart);
+  $("#emergencyChartPrint")?.addEventListener("click", () => { document.body.classList.add("print-emergency-chart"); window.print(); setTimeout(() => document.body.classList.remove("print-emergency-chart"), 300); });
+  $("#previewDSafety")?.addEventListener("click", previewDSafetyExcel);
+  $("#saveDSafetyBoard")?.addEventListener("click", saveDSafetyBoard);
+  $("#dSafetyBoardSelect")?.addEventListener("change", (event) => openDSafetyBoard(event.target.value));
+  $("#submitDSafetyOpinion")?.addEventListener("click", submitDSafetyOpinion);
+  $("#deleteDSafetyBoard")?.addEventListener("click", deleteDSafetyBoard);
+  $("#privacyDeviceSelect")?.addEventListener("change", loadPrivacyAdminEditor);
+  $("#saveAdminPrivacy")?.addEventListener("click", saveAdminPrivacy);
   const msdsDropZone = $("#msdsDropZone");
   msdsDropZone?.addEventListener("click", () => $("#msdsFileInput")?.click());
   msdsDropZone?.addEventListener("keydown", (event) => { if (["Enter", " "].includes(event.key)) { event.preventDefault(); $("#msdsFileInput")?.click(); } });
@@ -3773,6 +4437,7 @@ function bindEvents() {
   [$("#guardStartButton"), $("#guardTopButton")].forEach((button) => button.addEventListener("click", toggleGuard));
   $("#guardSaveProfile").addEventListener("click", saveGuardProfile);
   $("#guardZoneEnabled").addEventListener("change", handleGuardZoneToggle);
+  $("#guardFaceMosaic")?.addEventListener("change", saveGuardPrivacySetting);
   $$("[data-guard-zone-mode]").forEach((button) => button.addEventListener("click", () => setGuardZoneMode(button.dataset.guardZoneMode)));
   $("#guardZoneEditorEnabled")?.addEventListener("change", () => {
     const enabled = $("#guardZoneEditorEnabled").checked;
@@ -3889,6 +4554,9 @@ async function init() {
   bindEvents();
   renderRuleGroups();
   loadGuardProfile();
+  const savedOpinionUser = JSON.parse(localStorage.getItem("poseidon-dsafety-opinion-user") || "{}");
+  if ($("#dSafetyOpinionDept")) $("#dSafetyOpinionDept").value = savedOpinionUser.affiliation || "";
+  if ($("#dSafetyOpinionName")) $("#dSafetyOpinionName").value = savedOpinionUser.name || "";
   updateGuardZoneModeUi();
   startGuardZoneEditorLoop();
   if ($("#trainingSavedCount")) $("#trainingSavedCount").textContent = `${guard.trainingSavedCount}건`;
