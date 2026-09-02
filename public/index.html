@@ -451,7 +451,7 @@
             <div class="panel-header"><div><p class="eyebrow">EMERGENCY REPORTING CHART</p><h3>전사 안전·환경 비상상황 보고체계도</h3></div><span class="chart-zoom-rate" id="emergencyChartZoomRate">100%</span></div>
             <div class="emergency-chart-controls">
               <div class="admin-only emergency-chart-upload"><label class="primary-button file-button">보고체계도 이미지 등록<input id="emergencyChartFile" type="file" accept="image/png,image/jpeg,image/webp" hidden /></label><small>등록한 이미지는 관리자와 현장 사용자가 같은 화면에서 확인합니다. 개인정보가 포함된 경우 사내 기준에 맞게 관리해주세요.</small></div>
-              <div class="emergency-chart-toolbar"><button class="secondary-button" id="emergencyChartZoomOut" type="button">축소 −</button><button class="secondary-button" id="emergencyChartZoomIn" type="button">확대 ＋</button><button class="secondary-button" id="emergencyChartReset" type="button">원본 크기</button><button class="secondary-button" id="emergencyChartFit" type="button">화면 맞춤</button><a class="secondary-button emergency-chart-save" id="emergencyChartDownload" href="#" download hidden>이미지 저장</a></div>
+              <div class="emergency-chart-toolbar"><button class="secondary-button" id="emergencyChartZoomOut" type="button">축소 −</button><button class="secondary-button" id="emergencyChartZoomIn" type="button">확대 ＋</button><button class="secondary-button" id="emergencyChartReset" type="button">원본 크기</button><button class="secondary-button" id="emergencyChartFit" type="button">화면 맞춤</button><button class="danger-button admin-only" id="deleteEmergencyChart" type="button" hidden>이미지 삭제</button></div>
             </div>
             <div class="emergency-chart-viewport" id="emergencyChartViewport"><div class="emergency-chart-document" id="emergencyChartDocument"><img id="emergencyChartImage" alt="전사 안전·환경 비상상황 보고체계도" hidden /><div class="emergency-chart-empty" id="emergencyChartEmpty">등록된 비상상황 보고체계도 이미지가 없습니다. 관리자가 이미지를 등록해주세요.</div></div></div>
           </section>
@@ -460,10 +460,10 @@
         <section class="page" id="page-dsafety">
           <div class="section-toolbar dsafety-toolbar"><div><p class="eyebrow">D-SAFETY COMMUNICATION BOARD</p><h2>D-안전회의 · 위험요인 정리 뷰어</h2><p class="section-lead">D-안전회의 결과를 현장에 전파하고 종사자 의견을 태블릿·휴대폰에서 바로 수렴합니다.</p></div><span class="dsafety-source-chip">위험요인 · 안전조치 · 의견청취</span></div>
           <section class="panel dsafety-import-panel admin-only">
-            <div><p class="eyebrow">ADMIN EXCEL PASTE</p><h3>D-안전회의 결과 변환</h3><p>사업장을 지정한 뒤 엑셀 행을 붙여넣으면 작업정보·잠재위험·안전조치가 사업장별 소통보드로 정리됩니다.</p></div>
+            <div class="dsafety-import-heading"><p class="eyebrow">ADMIN EXCEL PASTE</p><h3>D-안전회의 결과 변환</h3><p>사업장을 지정한 뒤 엑셀 행을 붙여넣으면 작업정보·잠재위험·안전조치가 사업장별 소통보드로 정리됩니다.</p></div>
             <div class="dsafety-import-inputs">
-              <label class="dsafety-site-input">사업장<input id="dSafetySiteInput" maxlength="80" placeholder="예: 광양 / 포항 / 세종 / 구미" /></label>
-              <textarea id="dSafetyExcelInput" rows="7" placeholder="D-안전회의 결과 엑셀 행을 그대로 붙여넣으세요..."></textarea>
+              <label class="dsafety-site-input"><span>사업장</span><input id="dSafetySiteInput" maxlength="80" placeholder="예: 광양 / 포항 / 세종 / 구미" /></label>
+              <label class="dsafety-excel-field"><span>D-안전회의 결과 엑셀 행</span><textarea id="dSafetyExcelInput" rows="7" placeholder="엑셀에서 D-안전회의 결과 행 전체를 복사한 뒤 여기에 붙여넣으세요."></textarea></label>
             </div>
             <div class="dsafety-import-actions"><button class="secondary-button" id="previewDSafety" type="button">소통보드로 변환</button><button class="primary-button" id="saveDSafetyBoard" type="button" disabled>변환 결과 저장</button></div>
             <small id="dSafetyImportStatus">엑셀 데이터를 붙여넣으면 원본 파일을 업로드하지 않고 브라우저에서 구조화합니다.</small>

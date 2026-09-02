@@ -1,4 +1,4 @@
-const POSEIDON_BUILD = "6.14.0";
+const POSEIDON_BUILD = "6.15.0";
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -3851,19 +3851,18 @@ async function saveEmergencyContacts() {
 function renderEmergencyChart() {
   const img = $("#emergencyChartImage");
   const empty = $("#emergencyChartEmpty");
-  const link = $("#emergencyChartDownload");
+  const deleteButton = $("#deleteEmergencyChart");
   const url = state.emergency.config?.chartUrl;
   if (url) {
     img.src = `${url}?v=${Date.now()}`;
     img.hidden = false;
     empty.hidden = true;
-    link.href = url;
-    link.hidden = false;
+    if (deleteButton) deleteButton.hidden = state.session?.role !== "admin";
   } else {
     img.removeAttribute("src");
     img.hidden = true;
     empty.hidden = false;
-    link.hidden = true;
+    if (deleteButton) deleteButton.hidden = true;
   }
   applyEmergencyChartZoom();
 }
@@ -3929,6 +3928,18 @@ async function uploadEmergencyChart(file) {
     toast("비상상황 보고체계도를 등록했습니다.");
   } catch (error) { toast(error.message, 6000); }
   finally { $("#emergencyChartFile").value = ""; }
+}
+
+async function deleteEmergencyChart() {
+  if (state.session?.role !== "admin") return;
+  if (!state.emergency.config?.chartUrl) return toast("삭제할 보고체계도 이미지가 없습니다.");
+  if (!confirm("등록된 비상상황 보고체계도 이미지를 삭제할까요?")) return;
+  try {
+    state.emergency.config = await api("/api/emergency/chart", { method: "DELETE" });
+    state.emergency.chartScale = 1;
+    renderEmergencyChart();
+    toast("보고체계도 이미지를 삭제했습니다.");
+  } catch (error) { toast(error.message, 6000); }
 }
 
 function getEmergencyPosition() {
@@ -4504,6 +4515,7 @@ function bindEvents() {
   $("#addEmergencyContact")?.addEventListener("click", addEmergencyContactRow);
   $("#saveEmergencyContacts")?.addEventListener("click", saveEmergencyContacts);
   $("#emergencyChartFile")?.addEventListener("change", (event) => uploadEmergencyChart(event.target.files?.[0]));
+  $("#deleteEmergencyChart")?.addEventListener("click", deleteEmergencyChart);
   $("#emergencyChartZoomIn")?.addEventListener("click", () => { state.emergency.chartScale += .1; applyEmergencyChartZoom(); });
   $("#emergencyChartZoomOut")?.addEventListener("click", () => { state.emergency.chartScale -= .1; applyEmergencyChartZoom(); });
   $("#emergencyChartReset")?.addEventListener("click", () => { state.emergency.chartScale = 1; applyEmergencyChartZoom(); });

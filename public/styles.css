@@ -1283,3 +1283,28 @@ button, .top-action, .icon-button, .table-action { min-height: 42px; }
 @media(max-width:700px){.emergency-warning{align-items:flex-start}.emergency-warning-copy{gap:8px}.dsafety-import-inputs{grid-column:1}.dsafety-management-panel{grid-template-columns:1fr}.dsafety-management-panel>div:first-child{grid-column:auto}.dsafety-management-actions,.dsafety-management-panel>small{grid-column:auto}.dsafety-management-actions>*{flex:1 1 100%}.dsafety-filter-row{grid-template-columns:1fr}.dsafety-site-tabs{margin-right:-6px}.dsafety-opinion-panel>label textarea{min-height:150px}}
 .dsafety-board-title>div:last-child{display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:wrap}
 .dsafety-board-title>div:last-child>span:not(.dsafety-board-site){display:inline-flex;align-items:center;justify-content:center;border:1px solid rgba(64,215,231,.3);border-radius:999px;padding:6px 12px;color:#65e7f0;font-weight:900}
+
+
+/* === V6.15 emergency chart + D-safety input UI polish === */
+.emergency-chart-panel .panel-header{padding:4px 6px 0}
+.emergency-chart-panel .panel-header .eyebrow{padding-left:.22em;overflow:visible}
+.emergency-chart-panel .panel-header h3{padding-left:0}
+.emergency-chart-toolbar #deleteEmergencyChart{display:inline-flex;align-items:center;justify-content:center;min-height:54px}
+.dsafety-import-panel{display:grid!important;grid-template-columns:1fr!important;gap:16px!important;align-items:stretch}
+.dsafety-import-heading{min-width:0}
+.dsafety-import-heading h3{margin:.15rem 0 .45rem}
+.dsafety-import-heading p:not(.eyebrow){margin:0;max-width:900px;color:#9bb2bc;line-height:1.65;word-break:keep-all}
+.dsafety-import-inputs{grid-column:1!important;display:grid;gap:12px;min-width:0}
+.dsafety-site-input,.dsafety-excel-field{display:grid;gap:8px;color:var(--muted);font-size:12px;min-width:0}
+.dsafety-site-input>span,.dsafety-excel-field>span{font-weight:800;color:#bdd0d7}
+.dsafety-import-inputs textarea{display:block;width:100%;min-height:220px;padding:14px 15px;resize:vertical;color:var(--text);background:#081723;border:1px solid var(--line);border-radius:12px;outline:none;font:inherit;line-height:1.65;box-shadow:none}
+.dsafety-import-inputs textarea::placeholder{color:#607984}
+.dsafety-import-inputs textarea:focus{border-color:var(--cyan);box-shadow:0 0 0 3px rgba(89,224,220,.10)}
+.dsafety-import-actions{grid-column:1!important;display:flex;gap:10px;flex-wrap:wrap;margin-top:0}
+.dsafety-import-panel>small{grid-column:1!important;color:#88a4af;line-height:1.55}
+@media(max-width:700px){
+  .emergency-chart-panel .panel-header{padding-left:4px;padding-right:4px}
+  .dsafety-import-panel{padding:16px!important}
+  .dsafety-import-inputs textarea{min-height:250px}
+  .dsafety-import-actions>*{flex:1 1 100%}
+}

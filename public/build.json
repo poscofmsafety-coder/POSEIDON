@@ -1,6 +1,6 @@
 {
   "project": "POSEIDON",
-  "version": "6.14.0",
+  "version": "6.15.0",
   "theme": "mythology-command",
   "cloudflare": "workers+d1+durable-objects",
   "durableObjects": "exports-sqlite",
@@ -28,8 +28,8 @@
   "safetyLawSearch": "KOSHA-smart-search+literal-match-ranking+scroll-full-content+new-field-quick-queries+law.go.kr",
   "smartMsds": "admin-pdf-upload+chunked-d1+search+in-app-viewer+user-readonly+tolerant-pdf-header-validation",
   "emergency119": "editable-site-call+tel-link+browser-geolocation+admin-event+privacy-safe-contacts+report-chart",
-  "dSafetyMeeting": "site-tabs+date-filter+excel-paste-viewer+worker-opinion+d1+180d-retention+json-backup",
+  "dSafetyMeeting": "site-tabs+date-filter+excel-paste-unified-ui+worker-opinion+d1+180d-retention+json-backup",
   "privacy": "face-mosaic-live+preview+snapshot+stop-work-video",
   "emergencyContacts": "public-org-defaults+region-filter+admin-add-delete-edit+no-employee-pii-defaults",
-  "emergencyUi": "contact-phone-clean+line-broken-warning+centered-image-controls+no-print-button"
+  "emergencyUi": "chart-title-safe-padding+admin-image-delete+no-image-save"
 }

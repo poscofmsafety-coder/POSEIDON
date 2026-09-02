@@ -1962,6 +1962,14 @@ async function handleApi(request, env, ctx) {
     return json({ ok: true, data: await getEmergencyConfig(env) }, 201);
   }
 
+  if (path === "/api/emergency/chart" && method === "DELETE") {
+    if (!isAdmin) return error("보고체계도 삭제는 관리자 권한이 필요합니다.", 403);
+    const oldKey = await readSetting(env, "emergency_chart_key", "");
+    if (oldKey) await env.DB.prepare("DELETE FROM media WHERE key=?").bind(oldKey).run();
+    await writeSetting(env, "emergency_chart_key", "");
+    return json({ ok: true, data: await getEmergencyConfig(env) });
+  }
+
   if (path === "/api/emergency/report" && method === "POST") {
     const body = await readJson(request);
     const latitude = Number(body.latitude);
@@ -2026,7 +2034,7 @@ async function handleApi(request, env, ctx) {
       opinionsByBoard.get(item.board_id).push({ id: item.id, boardId: item.board_id, affiliation: item.affiliation || "", name: item.author_name || "", content: item.content || "", createdAt: item.created_at });
     }
     const boards = (boardsResult.results || []).map((row) => ({ ...mapDSafetyBoard(row), opinions: opinionsByBoard.get(row.id) || [] }));
-    return json({ ok: true, data: { exportedAt: nowIso(), version: "6.14.0", boards } });
+    return json({ ok: true, data: { exportedAt: nowIso(), version: "6.15.0", boards } });
   }
   const dSafetyBoardMatch = path.match(/^\/api\/d-safety\/boards\/([^/]+)$/);
   if (dSafetyBoardMatch && method === "GET") {
