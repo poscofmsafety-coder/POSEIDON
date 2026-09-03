@@ -1468,3 +1468,43 @@ body { font-size: 16px; }
   .sidebar .brand .sidebar-brand-subtitle span:first-child { font-size:11px; }
   .sidebar .brand .sidebar-brand-subtitle span:last-child { font-size:10.5px; }
 }
+
+
+/* POSEIDON V6.19 — POSCO Future M CI + approved guardian character dashboard art */
+.sidebar-brand-copy { min-width:0; display:grid; align-content:center; gap:7px; }
+.sidebar-brand-copy > strong { margin:0; }
+.sidebar-company-logo-wrap {
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  width:132px;
+  min-height:43px;
+  padding:4px 7px;
+  border:1px solid rgba(255,255,255,.20);
+  border-radius:8px;
+  background:rgba(255,255,255,.97);
+  box-shadow:0 5px 18px rgba(0,0,0,.16);
+  overflow:hidden;
+}
+.sidebar-company-logo { display:block; width:100%; height:auto; object-fit:contain; }
+.poseidon-character-card {
+  height:330px;
+  background:#031322;
+  border-color:rgba(69,239,255,.34);
+}
+.poseidon-character-card > img {
+  width:100%;
+  height:100%;
+  object-fit:cover;
+  object-position:center 46%;
+  filter:none;
+}
+.poseidon-character-card::before { background:linear-gradient(180deg,rgba(3,15,27,.04),rgba(3,15,27,.02) 68%,rgba(3,15,27,.12)); }
+.poseidon-character-card figcaption { display:none; }
+@media (max-width:1180px) {
+  .poseidon-character-card { height:min(56vw,440px); min-height:300px; }
+}
+@media (max-width:700px) {
+  .sidebar-company-logo-wrap { width:118px; min-height:39px; padding:4px 6px; }
+  .poseidon-character-card { height:min(88vw,430px); min-height:280px; }
+}

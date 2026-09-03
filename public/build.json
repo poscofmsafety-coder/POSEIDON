@@ -1,6 +1,6 @@
 {
   "project": "POSEIDON",
-  "version": "6.18.0",
+  "version": "6.19.0",
   "theme": "mythology-command",
   "cloudflare": "workers+d1+durable-objects",
   "durableObjects": "exports-sqlite",
@@ -35,5 +35,6 @@
   "adminNavigation": "overview+live+devices+zones+ppe+dsafety+law+msds+emergency+events+reports+settings",
   "removedAdminModulesUi": "unsafe-behavior+work-environment+heavy-equipment",
   "readability": "larger-ui-fonts+uniform-dsafety-form-labels+uniform-job-meta-text",
-  "branding": "POSCO Future M+Safety Don"
+  "branding": "POSEIDON+POSCO-Future-M-CI",
+  "dashboardHero": "integrated-safety-platform-copy+Pyuming-i+Poseokho-guardian-art"
 }
