@@ -1739,3 +1739,115 @@ body { font-size: 16px; }
   }
   .topbar-title h1 { margin-top: 4px; font-size: 20px; }
 }
+
+/* POSEIDON V6.23 — topbar action labels stay on one line */
+.topbar-actions {
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+  white-space: nowrap;
+  min-width: max-content;
+}
+.topbar-actions > * {
+  flex: 0 0 auto;
+}
+.top-action,
+.system-chip,
+.role-badge {
+  white-space: nowrap;
+  word-break: keep-all;
+  min-width: max-content;
+}
+.top-action b {
+  display: inline-block;
+  white-space: nowrap;
+  word-break: keep-all;
+}
+.clock {
+  min-width: 132px;
+  white-space: nowrap;
+  word-break: keep-all;
+  line-height: 1.25;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.icon-button {
+  flex: 0 0 42px;
+  min-width: 42px;
+}
+
+/* Compact desktop: keep each control readable instead of squeezing text. */
+@media (max-width: 1520px) and (min-width: 1281px) {
+  .topbar {
+    gap: 12px;
+    padding-left: 20px;
+    padding-right: 20px;
+  }
+  .topbar-title {
+    min-width: 225px;
+    padding-left: 10px;
+    padding-right: 18px;
+  }
+  .topbar-safety-don {
+    min-width: 265px;
+    padding-left: 18px;
+    padding-right: 10px;
+  }
+  .topbar-actions {
+    gap: 7px;
+  }
+  .top-action,
+  .system-chip,
+  .role-badge {
+    min-height: 40px;
+    padding-left: 10px;
+    padding-right: 10px;
+    font-size: 11.5px;
+  }
+  .clock {
+    min-width: 124px;
+    font-size: 11.5px;
+  }
+}
+
+/* Narrow desktop: move the whole control group to its own row, never split labels. */
+@media (max-width: 1280px) and (min-width: 821px) {
+  .topbar {
+    flex-wrap: wrap;
+    align-content: center;
+    row-gap: 10px;
+    min-height: 148px;
+  }
+  .topbar-heading-cluster {
+    flex: 1 1 100%;
+    width: 100%;
+  }
+  .topbar-actions {
+    width: 100%;
+    justify-content: flex-end;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: thin;
+    padding-bottom: 2px;
+  }
+  .top-action,
+  .system-chip,
+  .role-badge {
+    min-width: max-content;
+  }
+  .clock {
+    min-width: 150px;
+  }
+}
+
+/* Phone/tablet icon mode keeps the existing compact behavior. */
+@media (max-width: 820px) {
+  .topbar-actions {
+    min-width: 0;
+  }
+  .top-action {
+    min-width: 42px;
+  }
+  .clock {
+    min-width: 0;
+  }
+}
