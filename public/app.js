@@ -4607,6 +4607,7 @@ function bindEvents() {
   $$('[data-login-role]').forEach((button) => button.addEventListener("click", () => setLoginRole(button.dataset.loginRole)));
   $("#logoutButton").addEventListener("click", logout);
   $("#homeTopButton")?.addEventListener("click", () => goToPage("overview"));
+  $("#sidebarCiHome")?.addEventListener("click", () => goToPage("overview"));
   $$(".nav-item").forEach((button) => button.addEventListener("click", () => goToPage(button.dataset.page)));
   $("#lawSearchForm")?.addEventListener("submit", (event) => { event.preventDefault(); searchSafetyLaw($("#lawSearchInput")?.value, { navigate: false }); });
   $("#adminLawQuickForm")?.addEventListener("submit", (event) => { event.preventDefault(); submitQuickLawSearch("#adminLawQuickInput"); });

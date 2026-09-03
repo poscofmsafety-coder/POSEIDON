@@ -1,3 +1,5 @@
+> Current build: **V6.20.0** — CI-only sidebar home branding and Safety Don topbar.
+
 # POSEIDON v6.5
 
 > YOLO11n 사람 감지 · 모바일 호환 추론 · 이벤트 자동정리 · Colab/Kaggle 학습 파이프라인
