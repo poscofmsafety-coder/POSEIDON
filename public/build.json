@@ -1,6 +1,6 @@
 {
   "project": "POSEIDON",
-  "version": "6.23.0",
+  "version": "6.24.0",
   "theme": "mythology-command",
   "cloudflare": "workers+d1+durable-objects",
   "durableObjects": "exports-sqlite",
@@ -37,5 +37,5 @@
   "readability": "larger-ui-fonts+uniform-dsafety-form-labels+uniform-job-meta-text",
   "branding": "transparent-POSCO-Future-M-CI-home+platform-title+Safety-Don-header",
   "dashboardHero": "integrated-safety-platform-copy+Pyuming-i+Poseokho-guardian-art",
-  "topbar": "approved-reference-layout+responsive-functional-controls"
+  "topbar": "fixed-action-slot+nowrap+device-page-width-containment"
 }

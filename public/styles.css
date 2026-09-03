@@ -1851,3 +1851,81 @@ body { font-size: 16px; }
     min-width: 0;
   }
 }
+
+
+/* POSEIDON V6.24 — keep topbar action controls in the exact same position on every admin page */
+html {
+  scrollbar-gutter: stable;
+}
+
+@media (min-width: 1281px) {
+  .main-area {
+    min-width: 0;
+  }
+
+  .topbar {
+    width: 100%;
+    box-sizing: border-box;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) max-content;
+    align-items: center;
+    justify-content: stretch;
+    column-gap: 18px;
+  }
+
+  .topbar-heading-cluster {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .topbar-actions {
+    justify-self: end;
+    align-self: center;
+    margin-left: 0;
+    width: auto;
+    min-width: 0;
+  }
+
+  #homeTopButton {
+    width: 76px;
+    justify-content: center;
+  }
+
+  #qrOpenButton {
+    width: 102px;
+    justify-content: center;
+  }
+
+  .topbar-actions .system-chip {
+    width: 132px;
+    justify-content: center;
+  }
+
+  .topbar-actions .role-badge {
+    width: 72px;
+    justify-content: center;
+  }
+
+  .topbar-actions .clock {
+    width: 132px;
+    min-width: 132px;
+  }
+
+  .topbar-actions .icon-button {
+    width: 42px;
+    min-width: 42px;
+  }
+
+  /* Wide tables on Device Management must scroll inside the panel, not widen the page/header. */
+  #page-devices,
+  #page-devices .section-toolbar,
+  #page-devices .table-panel {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  #page-devices .table-panel {
+    width: 100%;
+    overflow-x: auto;
+  }
+}
