@@ -7,7 +7,7 @@
     <meta name="description" content="POSCO Future M POSEIDON - AI 관제, D-안전소통보드, 안전보건법령, MSDS, 비상대응을 통합한 안전보건관리 플랫폼" />
     <title>POSEIDON 스마트 안전지킴이 | POSCO Future M</title>
     <link rel="icon" href="/favicon.svg" />
-    <link rel="stylesheet" href="/styles.css?v=6.25.0" />
+    <link rel="stylesheet" href="/styles.css?v=6.27.0" />
   </head>
   <body>
     <div class="login-screen" id="loginScreen" hidden>
@@ -49,6 +49,7 @@
           <button class="nav-item" data-page="dsafety" type="button"><span>☷</span>D-안전소통보드</button>
           <button class="nav-item" data-page="law" type="button"><span>§</span>스마트 안전보건법령</button>
           <button class="nav-item" data-page="msds" type="button"><span>▧</span>스마트 MSDS</button>
+          <button class="nav-item safety-ball-nav" data-page="safety-ball" type="button"><span>◌</span>스마트 세이프티 볼</button>
           <button class="nav-item emergency-nav" data-page="emergency" type="button"><span>✚</span>119 신고</button>
           <button class="nav-item" data-page="events" type="button"><span>≡</span>이벤트 센터</button>
           <button class="nav-item" data-page="reports" type="button"><span>↗</span>리포트</button>
@@ -60,6 +61,7 @@
           <button class="nav-item" data-page="dsafety" type="button"><span>☷</span>D-안전소통보드</button>
           <button class="nav-item" data-page="law" type="button"><span>§</span>스마트 안전보건법령</button>
           <button class="nav-item" data-page="msds" type="button"><span>▧</span>스마트 MSDS</button>
+          <button class="nav-item safety-ball-nav" data-page="safety-ball" type="button"><span>◌</span>스마트 세이프티 볼</button>
           <button class="nav-item emergency-nav" data-page="emergency" type="button"><span>✚</span>119 신고</button>
           <button class="nav-item" data-page="user-help" type="button"><span>?</span>사용 안내</button>
         </nav>
@@ -394,6 +396,89 @@
         </section>
 
 
+        <section class="page" id="page-safety-ball">
+          <div class="section-toolbar safety-ball-toolbar">
+            <div>
+              <p class="eyebrow">POSEIDON · SMART SAFETY BALL</p>
+              <h2>스마트 세이프티 볼 가스 모니터링</h2>
+              <p class="section-lead">Smart Safety Ball의 O2·CO·H2S·배터리·위치 데이터를 POSEIDON으로 수신해 현장별로 확인합니다.</p>
+            </div>
+            <div class="safety-ball-toolbar-actions">
+              <a class="secondary-button safety-ball-app-link" href="https://apps.apple.com/kr/app/%EC%84%B8%EC%9D%B4%ED%94%84%ED%8B%B0-%EB%B3%BC-safety-ball/id1556550029" target="_blank" rel="noopener noreferrer">Safety Ball 앱 ↗</a>
+              <button class="secondary-button" id="safetyBallRefresh" type="button">새로고침</button>
+            </div>
+          </div>
+
+          <div class="safety-ball-info panel">
+            <span class="safety-ball-info-icon">◌</span>
+            <div>
+              <b>키 없이 Bluetooth 직접 수신 우선</b>
+              <p>Safety Ball → Bluetooth 광고/장치 신호 → POSEIDON 브라우저 → 기존 로그인 세션 → D1 저장 → 관리자·현장 사용자 조회</p>
+              <small>별도의 SAFETY_BALL_INGEST_KEY는 사용하지 않습니다. 가스값 자동 해석은 실제 Safety Ball이 내보내는 BLE 광고 데이터 구조를 확인한 뒤 연결합니다.</small>
+            </div>
+          </div>
+
+          <section class="panel safety-ball-integration">
+            <div class="panel-header">
+              <div><p class="eyebrow">LOCAL BLUETOOTH</p><h3>Safety Ball Bluetooth 연결 · 진단</h3></div>
+              <span class="safety-ball-source-chip">NO API KEY</span>
+            </div>
+            <div class="safety-ball-integration-grid">
+              <div class="safety-ball-endpoint-card">
+                <span>인증 방식</span>
+                <b>POSEIDON 로그인 세션</b>
+                <small>관리자·현장 사용자가 로그인한 브라우저에서만 가스 데이터를 저장합니다. 별도 Cloudflare 수신 키 설정이 없습니다.</small>
+              </div>
+              <div class="safety-ball-endpoint-card">
+                <span>Bluetooth 상태</span>
+                <b id="safetyBallBleSummary">확인 전</b>
+                <small>Windows Edge/Chrome 또는 Android Chrome 계열에서 먼저 진단합니다. 지원되지 않는 브라우저는 안내만 표시합니다.</small>
+              </div>
+              <div class="safety-ball-endpoint-card">
+                <span>자동 보관</span>
+                <b>최근 30일</b>
+                <small>O2 · CO · H2S · 배터리 · GPS 이력을 D1에 저장하고 오래된 측정값은 일일 정리합니다.</small>
+              </div>
+            </div>
+            <div class="safety-ball-admin-actions safety-ball-ble-actions">
+              <button class="secondary-button" id="safetyBallBleCheck" type="button">Bluetooth 사용 가능 확인</button>
+              <button class="primary-button" id="safetyBallBleStart" type="button">BLE 진단 시작</button>
+              <button class="secondary-button" id="safetyBallBleStop" type="button" disabled>진단 중지</button>
+              <button class="secondary-button" id="safetyBallBleCopy" type="button">진단 내용 복사</button>
+              <button class="secondary-button admin-only" id="safetyBallTestButton" type="button">테스트 데이터 수신</button>
+            </div>
+            <div class="safety-ball-ble-diagnostic">
+              <div class="safety-ball-ble-status-row"><span class="safety-ball-ble-dot" id="safetyBallBleDot"></span><b id="safetyBallBleStatus">Bluetooth 진단을 시작하지 않았습니다.</b></div>
+              <pre id="safetyBallBleLog">Safety Ball을 켠 뒤 ‘BLE 진단 시작’을 눌러주세요.
+수신되는 장치명·RSSI·manufacturerData·serviceData를 이곳에 표시합니다.</pre>
+              <small>이 진단은 페어링 비밀번호나 제조사 API 승인을 요구하지 않습니다. 단, 브라우저가 BLE 광고 스캔을 지원하지 않으면 장치 선택 방식으로만 확인할 수 있습니다.</small>
+            </div>
+          </section>
+
+          <section class="panel safety-ball-overview-panel">
+            <div class="panel-header">
+              <div><p class="eyebrow">LIVE GAS STATUS</p><h3>최근 수신 장치</h3></div>
+              <span class="safety-ball-count" id="safetyBallDeviceCount">0대</span>
+            </div>
+            <div class="safety-ball-live-grid" id="safetyBallLiveGrid">
+              <div class="safety-ball-empty"><span>◌</span><b>아직 수신된 Safety Ball 데이터가 없습니다.</b><small>연동 후 O2·CO·H2S·배터리 값이 여기에 표시됩니다.</small></div>
+            </div>
+          </section>
+
+          <section class="panel safety-ball-history-panel">
+            <div class="safety-ball-history-head">
+              <div><p class="eyebrow">GAS HISTORY</p><h3>가스 측정 이력</h3></div>
+              <label>장치 선택<select id="safetyBallDeviceSelect"><option value="">전체 장치</option></select></label>
+            </div>
+            <div class="safety-ball-table-wrap">
+              <table class="safety-ball-table">
+                <thead><tr><th>수신시간</th><th>사업장</th><th>장치</th><th>O2</th><th>CO</th><th>H2S</th><th>배터리</th><th>상태</th><th>위치</th></tr></thead>
+                <tbody id="safetyBallHistoryBody"><tr><td colspan="9" class="safety-ball-table-empty">수신 이력이 없습니다.</td></tr></tbody>
+              </table>
+            </div>
+          </section>
+        </section>
+
         <section class="page" id="page-emergency">
           <div class="section-toolbar emergency-toolbar">
             <div><p class="eyebrow">POSEIDON · EMERGENCY RESPONSE</p><h2>119 신고 · GPS 비상대응</h2><p class="section-lead">사업장별 긴급전화, 현재 GPS 위치, 비상연락망과 전사 비상상황 보고체계를 한 화면에서 확인합니다.</p></div>
@@ -573,6 +658,6 @@
     <div class="sidebar-scrim" id="sidebarScrim"></div>
 
     <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js" defer></script>
-    <script type="module" src="/app.js?v=6.25.0"></script>
+    <script type="module" src="/app.js?v=6.27.0"></script>
   </body>
 </html>

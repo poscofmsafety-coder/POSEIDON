@@ -122,11 +122,29 @@ const SCHEMA = [
     content TEXT NOT NULL,
     created_at TEXT NOT NULL
   )`,
+  `CREATE TABLE IF NOT EXISTS safety_ball_readings (
+    id TEXT PRIMARY KEY,
+    device_id TEXT NOT NULL,
+    site TEXT NOT NULL DEFAULT '',
+    o2 REAL,
+    co REAL,
+    h2s REAL,
+    battery REAL,
+    latitude REAL,
+    longitude REAL,
+    alarm INTEGER NOT NULL DEFAULT 0,
+    alarm_type TEXT NOT NULL DEFAULT '',
+    source TEXT NOT NULL DEFAULT 'gateway',
+    recorded_at TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  )`,
   `CREATE TABLE IF NOT EXISTS app_settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL,
     updated_at TEXT NOT NULL
   )`,
+  `CREATE INDEX IF NOT EXISTS idx_safety_ball_device_time ON safety_ball_readings(device_id, recorded_at DESC)`,
+  `CREATE INDEX IF NOT EXISTS idx_safety_ball_recorded ON safety_ball_readings(recorded_at DESC)`,
   `CREATE INDEX IF NOT EXISTS idx_msds_title ON msds_documents(title)`,
   `CREATE INDEX IF NOT EXISTS idx_msds_uploaded ON msds_documents(uploaded_at DESC)`,
   `CREATE INDEX IF NOT EXISTS idx_dsafety_created ON d_safety_boards(created_at DESC)`,
@@ -1814,6 +1832,99 @@ async function getDSafetyBoard(env, id) {
   return { ...mapDSafetyBoard(row), opinions: (opinions.results || []).map((item) => ({ id: item.id, boardId: item.board_id, affiliation: item.affiliation || "", name: item.author_name || "", jobName: item.job_name || "", content: item.content || "", createdAt: item.created_at })) };
 }
 
+
+function finiteOrNull(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function normalizeSafetyBallReading(input = {}) {
+  const deviceId = String(input.deviceId || input.device_id || input.serial || input.uuid || "").trim().slice(0, 120);
+  if (!deviceId) throw new Error("Safety Ball deviceId가 필요합니다.");
+  const site = String(input.site || input.siteName || input.locationName || "").trim().slice(0, 120);
+  const recordedRaw = input.recordedAt || input.recorded_at || input.timestamp || nowIso();
+  const recordedDate = new Date(recordedRaw);
+  const recordedAt = Number.isNaN(recordedDate.getTime()) ? nowIso() : recordedDate.toISOString();
+  return {
+    deviceId,
+    site,
+    o2: finiteOrNull(input.o2 ?? input.O2),
+    co: finiteOrNull(input.co ?? input.CO),
+    h2s: finiteOrNull(input.h2s ?? input.H2S),
+    battery: finiteOrNull(input.battery ?? input.batteryPercent),
+    latitude: finiteOrNull(input.latitude ?? input.lat),
+    longitude: finiteOrNull(input.longitude ?? input.lng ?? input.lon),
+    alarm: input.alarm === true || Number(input.alarm) === 1 ? 1 : 0,
+    alarmType: String(input.alarmType || input.alarm_type || input.status || "").trim().slice(0, 120),
+    source: String(input.source || "gateway").trim().slice(0, 80) || "gateway",
+    recordedAt,
+  };
+}
+
+async function insertSafetyBallReading(env, input) {
+  const item = normalizeSafetyBallReading(input);
+  const id = randomId("sball");
+  const createdAt = nowIso();
+  await env.DB.prepare(`INSERT INTO safety_ball_readings
+    (id,device_id,site,o2,co,h2s,battery,latitude,longitude,alarm,alarm_type,source,recorded_at,created_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+    .bind(id, item.deviceId, item.site, item.o2, item.co, item.h2s, item.battery, item.latitude, item.longitude, item.alarm, item.alarmType, item.source, item.recordedAt, createdAt)
+    .run();
+  return { id, ...item, createdAt };
+}
+
+function mapSafetyBallRow(row) {
+  return {
+    id: row.id,
+    deviceId: row.device_id,
+    site: row.site || "",
+    o2: row.o2,
+    co: row.co,
+    h2s: row.h2s,
+    battery: row.battery,
+    latitude: row.latitude,
+    longitude: row.longitude,
+    alarm: Number(row.alarm || 0),
+    alarmType: row.alarm_type || "",
+    source: row.source || "",
+    recordedAt: row.recorded_at,
+    createdAt: row.created_at,
+  };
+}
+
+async function getSafetyBallLatest(env) {
+  const result = await env.DB.prepare(`SELECT r.* FROM safety_ball_readings r
+    INNER JOIN (SELECT device_id, MAX(recorded_at) AS max_recorded_at FROM safety_ball_readings GROUP BY device_id) x
+      ON x.device_id=r.device_id AND x.max_recorded_at=r.recorded_at
+    ORDER BY r.recorded_at DESC LIMIT 100`).all();
+  const seen = new Set();
+  const items = [];
+  for (const row of result.results || []) {
+    if (seen.has(row.device_id)) continue;
+    seen.add(row.device_id);
+    items.push(mapSafetyBallRow(row));
+  }
+  return items;
+}
+
+async function getSafetyBallHistory(env, url) {
+  const limit = Math.min(500, Math.max(1, Number(url.searchParams.get("limit") || 120)));
+  const deviceId = String(url.searchParams.get("deviceId") || "").trim();
+  const result = deviceId
+    ? await env.DB.prepare("SELECT * FROM safety_ball_readings WHERE device_id=? ORDER BY recorded_at DESC LIMIT ?").bind(deviceId, limit).all()
+    : await env.DB.prepare("SELECT * FROM safety_ball_readings ORDER BY recorded_at DESC LIMIT ?").bind(limit).all();
+  return (result.results || []).map(mapSafetyBallRow);
+}
+
+async function cleanupSafetyBallReadings(env, days = 30) {
+  const safeDays = Math.min(365, Math.max(1, Number(days || 30)));
+  const cutoff = new Date(Date.now() - safeDays * 86400000).toISOString();
+  const result = await env.DB.prepare("DELETE FROM safety_ball_readings WHERE recorded_at < ?").bind(cutoff).run();
+  return { deleted: Number(result.meta?.changes || 0), days: safeDays, cutoff };
+}
+
+
 /* ---------- API ---------- */
 
 async function handleAuth(request, env) {
@@ -1871,6 +1982,18 @@ async function handleApi(request, env, ctx) {
   const isAdmin = auth.session.role === "admin";
 
   await ensureSchema(env);
+
+  if (path === "/api/safety-ball/ingest" && method === "POST") {
+    const body = await readJson(request);
+    const readings = Array.isArray(body?.readings) ? body.readings.slice(0, 100) : [body];
+    if (!readings.length) return error("수신할 Safety Ball 데이터가 없습니다.");
+    const stored = [];
+    for (const reading of readings) {
+      const normalized = { ...reading, source: String(reading?.source || "poseidon-browser-ble") };
+      stored.push(await insertSafetyBallReading(env, normalized));
+    }
+    return json({ ok: true, data: { accepted: stored.length, items: stored, auth: "poseidon-session" } }, 201);
+  }
 
   if (path === "/api/ice" && method === "GET") {
     let extra = [];
@@ -1935,6 +2058,30 @@ async function handleApi(request, env, ctx) {
     ]);
     return json({ ok: true, data: { id, deleted: true, stats: await getMsdsStats(env) } });
   }
+  if (path === "/api/safety-ball/latest" && method === "GET") {
+    return json({ ok: true, data: { items: await getSafetyBallLatest(env), retentionDays: 30 } });
+  }
+  if (path === "/api/safety-ball/history" && method === "GET") {
+    return json({ ok: true, data: { items: await getSafetyBallHistory(env, url), retentionDays: 30 } });
+  }
+  if (path === "/api/safety-ball/test" && method === "POST") {
+    if (!isAdmin) return error("Safety Ball 테스트는 관리자 권한이 필요합니다.", 403);
+    const body = await readJson(request).catch(() => ({}));
+    const now = Date.now();
+    const sample = {
+      deviceId: String(body.deviceId || "SAFETY-BALL-DEMO-01"),
+      site: String(body.site || "연동 테스트"),
+      o2: Number((20.7 + Math.random() * 0.4).toFixed(1)),
+      co: Number((Math.random() * 4).toFixed(1)),
+      h2s: Number((Math.random() * 1.5).toFixed(1)),
+      battery: Math.round(72 + Math.random() * 24),
+      alarm: false,
+      source: "poseidon-demo",
+      recordedAt: new Date(now).toISOString(),
+    };
+    return json({ ok: true, data: await insertSafetyBallReading(env, sample) }, 201);
+  }
+
   if (path === "/api/emergency/config" && method === "GET") return json({ ok: true, data: await getEmergencyConfig(env) });
   if (path === "/api/emergency/config" && method === "PUT") {
     if (!isAdmin) return error("비상연락망 수정은 관리자 권한이 필요합니다.", 403);
@@ -2572,6 +2719,8 @@ export default {
         const result = await cleanupDSafetyOlderThan(env, dSafetySettings.days);
         console.log(`POSEIDON D-safety retention cleanup: ${result.deleted} deleted, ${dSafetySettings.days} days retained`);
       }
+      const safetyBallResult = await cleanupSafetyBallReadings(env, 30);
+      console.log(`POSEIDON Safety Ball retention cleanup: ${safetyBallResult.deleted} deleted, 30 days retained`);
     })());
   },
 };

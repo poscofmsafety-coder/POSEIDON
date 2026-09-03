@@ -1,6 +1,6 @@
 {
   "project": "POSEIDON",
-  "version": "6.25.0",
+  "version": "6.27.0",
   "theme": "mythology-command",
   "cloudflare": "workers+d1+durable-objects",
   "durableObjects": "exports-sqlite",
@@ -32,10 +32,11 @@
   "privacy": "face-mosaic-live+preview+snapshot+stop-work-video",
   "emergencyContacts": "public-org-defaults+region-filter+admin-add-delete-edit+no-employee-pii-defaults",
   "emergencyUi": "chart-title-safe-padding+admin-image-delete+no-image-save",
-  "adminNavigation": "overview+live+devices+zones+ppe+dsafety+law+msds+emergency+events+reports+settings",
+  "adminNavigation": "overview+live+devices+zones+ppe+dsafety+law+msds+safety-ball+emergency+events+reports+settings",
   "removedAdminModulesUi": "unsafe-behavior+work-environment+heavy-equipment",
   "readability": "larger-ui-fonts+uniform-dsafety-form-labels+uniform-job-meta-text",
   "branding": "transparent-POSCO-Future-M-CI-home+slightly-reduced-CI+platform-title+Safety-Don-header",
   "dashboardHero": "integrated-safety-platform-copy+Pyuming-i+Poseokho-guardian-art",
-  "topbar": "fixed-action-slot+nowrap+device-page-width-containment+safety-don-left-balance+no-overlap"
+  "topbar": "fixed-action-slot+nowrap+device-page-width-containment+safety-don-left-balance+no-overlap",
+  "smartSafetyBall": "keyless-local-ble+poseidon-session-auth+raw-ble-diagnostic+O2+CO+H2S+battery+gps+live-history+30d-retention"
 }

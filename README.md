@@ -1,3 +1,6 @@
+
+> Current build: **V6.27.0** — Smart Safety Ball keyless local-Bluetooth diagnostic, POSEIDON session-authenticated ingest, O2/CO/H2S/battery/GPS live view and 30-day history retention.
+
 > Current UI patch: POSEIDON V6.22 — approved main dashboard header layout.
 
 > Current build: **V6.22.0** — transparent POSCO Future M CI, platform title, Safety Don copy, and aligned responsive topbar.
@@ -229,3 +232,12 @@ Cloudflare Secret:
 - Safety Don 영역을 왼쪽 여유 공간으로 재배치해 홈 버튼과 겹치지 않게 했습니다.
 - 플랫폼 제목/Safety Don 사이와 Safety Don/액션 버튼 사이의 여백을 균형 있게 조정했습니다.
 - 포스코퓨처엠 CI 크기를 아주 조금 축소했습니다.
+
+## V6.27 스마트 세이프티 볼 — 별도 키 없는 로컬 Bluetooth 우선
+- 별도 `SAFETY_BALL_INGEST_KEY`를 사용하지 않습니다.
+- Safety Ball 저장 API는 기존 POSEIDON 로그인 세션 쿠키로 인증합니다.
+- 스마트 세이프티 볼 화면에서 Bluetooth 사용 가능 여부와 BLE 원시 광고 진단을 할 수 있습니다.
+- 광고 스캔이 지원되면 장치명, RSSI, UUID, manufacturerData, serviceData를 표시합니다.
+- 광고 스캔이 지원되지 않으면 브라우저 장치 선택 방식으로 최소 연결 가능 여부를 확인합니다.
+- 실제 O2/CO/H2S 자동 해석은 현장에서 수집한 BLE 원시 패킷과 Safety Ball 앱 수치를 대조한 뒤 매핑합니다.
+- 기존 O2/CO/H2S/배터리/GPS 저장, 현황, 이력, 30일 정리는 유지합니다.

@@ -1,4 +1,4 @@
-const POSEIDON_BUILD = "6.25.0";
+const POSEIDON_BUILD = "6.26.0";
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -13,6 +13,7 @@ const pageTitles = {
   ppe: "근로자 보호구",
   law: "스마트 안전보건법령",
   msds: "스마트 MSDS",
+  "safety-ball": "스마트 세이프티 볼",
   emergency: "119 신고",
   dsafety: "D-안전소통보드",
   events: "이벤트 센터",
@@ -104,6 +105,7 @@ const state = {
   emergencySeenIds: new Set(),
   emergencyAlertInitialized: false,
   msds: { items: [], selectedId: null, query: "", stats: { count: 0, totalBytes: 0, softLimitBytes: 0 }, selectedFile: null },
+  safetyBall: { latest: [], history: [], selectedDeviceId: "", timer: null, loading: false, bleScan: null, bleListener: null, bleEvents: [], bleScanning: false },
   emergency: { config: null, position: null, chartScale: 1 },
   dSafety: { boards: [], selectedId: null, current: null, preview: null, siteFilter: "", dateFilter: "", retention: null },
 };
@@ -342,6 +344,7 @@ async function login(event) {
 async function logout() {
   try { await api("/api/auth/logout", { method: "POST" }); } catch { /* noop */ }
   stopDashboardPolling();
+  stopSafetyBallPolling();
   closeAllAdminSignals();
   if (guard.active) await stopGuard();
   endCall(false);
@@ -350,7 +353,7 @@ async function logout() {
 
 function goToPage(page) {
   if (!pageTitles[page]) return;
-  if (state.session?.role === "user" && !["guard", "emergency", "dsafety", "law", "msds", "user-help"].includes(page)) page = "guard";
+  if (state.session?.role === "user" && !["guard", "emergency", "dsafety", "law", "msds", "safety-ball", "user-help"].includes(page)) page = "guard";
   state.currentPage = page;
   $$(".page").forEach((section) => section.classList.toggle("active", section.id === `page-${page}`));
   $$(".nav-item").forEach((button) => button.classList.toggle("active", button.dataset.page === page));
@@ -364,6 +367,8 @@ function goToPage(page) {
     if (page === "events") loadEventRetentionSettings();
   }
   if (page === "msds") loadMsdsDocuments();
+  if (page === "safety-ball") startSafetyBallPolling();
+  else stopSafetyBallPolling();
   if (page === "emergency") loadEmergencyConfig();
   if (page === "dsafety") loadDSafetyBoards();
   if (page === "settings" && state.session?.role === "admin") loadPrivacyAdminEditor();
@@ -4602,6 +4607,267 @@ function handleGuardZoneToggle() {
   toast(enabled ? "위험구역 감지를 켰습니다." : "위험구역 감지를 껐습니다. 구역 표시와 경고가 중지됩니다.");
 }
 
+
+function formatGasValue(value, unit, digits = 1) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "-";
+  return `${number.toFixed(digits)}${unit}`;
+}
+
+function safetyBallMapLink(item) {
+  const lat = Number(item?.latitude);
+  const lng = Number(item?.longitude);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return "";
+  return `https://maps.google.com/?q=${encodeURIComponent(`${lat},${lng}`)}`;
+}
+
+function renderSafetyBallLatest() {
+  const items = Array.isArray(state.safetyBall.latest) ? state.safetyBall.latest : [];
+  const grid = $("#safetyBallLiveGrid");
+  if ($("#safetyBallDeviceCount")) $("#safetyBallDeviceCount").textContent = `${items.length}대`;
+  if (!grid) return;
+  if (!items.length) {
+    grid.innerHTML = `<div class="safety-ball-empty"><span>◌</span><b>아직 수신된 Safety Ball 데이터가 없습니다.</b><small>연동 후 O2·CO·H2S·배터리 값이 여기에 표시됩니다.</small></div>`;
+    return;
+  }
+  grid.innerHTML = items.map((item) => {
+    const alarm = Boolean(Number(item.alarm));
+    const mapLink = safetyBallMapLink(item);
+    return `<article class="safety-ball-device-card ${alarm ? "alarm" : ""}">
+      <div class="safety-ball-device-head"><div><span>${escapeHtml(item.site || "사업장 미지정")}</span><h4>${escapeHtml(item.deviceId || "Safety Ball")}</h4></div><b class="safety-ball-live-status ${alarm ? "danger" : "ok"}">${alarm ? "경보 수신" : "데이터 수신"}</b></div>
+      <div class="safety-ball-gas-grid">
+        <div><span>O2</span><strong>${formatGasValue(item.o2, "%", 1)}</strong></div>
+        <div><span>CO</span><strong>${formatGasValue(item.co, " ppm", 1)}</strong></div>
+        <div><span>H2S</span><strong>${formatGasValue(item.h2s, " ppm", 1)}</strong></div>
+        <div><span>배터리</span><strong>${formatGasValue(item.battery, "%", 0)}</strong></div>
+      </div>
+      <div class="safety-ball-device-foot"><span>최근 수신 ${escapeHtml(formatDate(item.recordedAt))}</span>${mapLink ? `<a href="${mapLink}" target="_blank" rel="noopener noreferrer">GPS 위치 ↗</a>` : ""}</div>
+    </article>`;
+  }).join("");
+}
+
+function renderSafetyBallHistory() {
+  const rows = Array.isArray(state.safetyBall.history) ? state.safetyBall.history : [];
+  const body = $("#safetyBallHistoryBody");
+  if (!body) return;
+  if (!rows.length) {
+    body.innerHTML = `<tr><td colspan="9" class="safety-ball-table-empty">수신 이력이 없습니다.</td></tr>`;
+    return;
+  }
+  body.innerHTML = rows.map((item) => {
+    const alarm = Boolean(Number(item.alarm));
+    const mapLink = safetyBallMapLink(item);
+    return `<tr>
+      <td>${escapeHtml(formatDate(item.recordedAt))}</td>
+      <td>${escapeHtml(item.site || "-")}</td>
+      <td><b>${escapeHtml(item.deviceId || "-")}</b></td>
+      <td>${formatGasValue(item.o2, "%", 1)}</td>
+      <td>${formatGasValue(item.co, " ppm", 1)}</td>
+      <td>${formatGasValue(item.h2s, " ppm", 1)}</td>
+      <td>${formatGasValue(item.battery, "%", 0)}</td>
+      <td><span class="safety-ball-state-pill ${alarm ? "danger" : "ok"}">${alarm ? escapeHtml(item.alarmType || "경보") : "수신"}</span></td>
+      <td>${mapLink ? `<a class="safety-ball-map-link" href="${mapLink}" target="_blank" rel="noopener noreferrer">지도 ↗</a>` : "-"}</td>
+    </tr>`;
+  }).join("");
+}
+
+function syncSafetyBallDeviceSelect() {
+  const select = $("#safetyBallDeviceSelect");
+  if (!select) return;
+  const current = state.safetyBall.selectedDeviceId || "";
+  const devices = [...new Set((state.safetyBall.latest || []).map((item) => item.deviceId).filter(Boolean))];
+  select.innerHTML = `<option value="">전체 장치</option>${devices.map((id) => `<option value="${escapeHtml(id)}">${escapeHtml(id)}</option>`).join("")}`;
+  if (devices.includes(current)) select.value = current;
+  else { select.value = ""; state.safetyBall.selectedDeviceId = ""; }
+}
+
+async function loadSafetyBallData({ silent = false } = {}) {
+  if (state.safetyBall.loading) return;
+  state.safetyBall.loading = true;
+  try {
+    const selected = state.safetyBall.selectedDeviceId;
+    const [latest, history] = await Promise.all([
+      api("/api/safety-ball/latest"),
+      api(`/api/safety-ball/history?limit=120${selected ? `&deviceId=${encodeURIComponent(selected)}` : ""}`),
+    ]);
+    state.safetyBall.latest = Array.isArray(latest?.items) ? latest.items : [];
+    state.safetyBall.history = Array.isArray(history?.items) ? history.items : [];
+    renderSafetyBallLatest();
+    syncSafetyBallDeviceSelect();
+    renderSafetyBallHistory();
+  } catch (error) {
+    if (!silent) toast(`Safety Ball 데이터 오류: ${error.message}`);
+  } finally {
+    state.safetyBall.loading = false;
+  }
+}
+
+function startSafetyBallPolling() {
+  stopSafetyBallPolling();
+  loadSafetyBallData();
+  state.safetyBall.timer = setInterval(() => {
+    if (state.currentPage === "safety-ball") loadSafetyBallData({ silent: true });
+  }, 5000);
+}
+
+function stopSafetyBallPolling() {
+  if (state.safetyBall.timer) clearInterval(state.safetyBall.timer);
+  state.safetyBall.timer = null;
+}
+
+async function createSafetyBallTestReading() {
+  const button = $("#safetyBallTestButton");
+  if (button) button.disabled = true;
+  try {
+    await api("/api/safety-ball/test", { method: "POST", body: JSON.stringify({}) });
+    toast("Safety Ball 테스트 데이터를 수신했습니다.");
+    await loadSafetyBallData();
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+function safetyBallBytesToHex(value) {
+  if (!value) return "";
+  let bytes;
+  if (value instanceof DataView) bytes = new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+  else if (value instanceof ArrayBuffer) bytes = new Uint8Array(value);
+  else if (ArrayBuffer.isView(value)) bytes = new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+  else return "";
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join(" ");
+}
+
+function safetyBallMapToRaw(mapLike) {
+  const output = [];
+  if (!mapLike || typeof mapLike.forEach !== "function") return output;
+  mapLike.forEach((value, key) => output.push({ key: String(key), hex: safetyBallBytesToHex(value) }));
+  return output;
+}
+
+function renderSafetyBallBleStatus(message, tone = "idle") {
+  const summary = $("#safetyBallBleSummary");
+  const status = $("#safetyBallBleStatus");
+  const dot = $("#safetyBallBleDot");
+  if (summary) summary.textContent = message;
+  if (status) status.textContent = message;
+  if (dot) dot.dataset.tone = tone;
+  const start = $("#safetyBallBleStart");
+  const stop = $("#safetyBallBleStop");
+  if (start) start.disabled = Boolean(state.safetyBall.bleScanning);
+  if (stop) stop.disabled = !state.safetyBall.bleScanning;
+}
+
+function renderSafetyBallBleLog() {
+  const box = $("#safetyBallBleLog");
+  if (!box) return;
+  if (!state.safetyBall.bleEvents.length) {
+    box.textContent = "Safety Ball을 켠 뒤 ‘BLE 진단 시작’을 눌러주세요.\n수신되는 장치명·RSSI·manufacturerData·serviceData를 이곳에 표시합니다.";
+    return;
+  }
+  box.textContent = state.safetyBall.bleEvents.map((item) => JSON.stringify(item)).join("\n");
+  box.scrollTop = box.scrollHeight;
+}
+
+function appendSafetyBallBleEvent(event) {
+  state.safetyBall.bleEvents.push(event);
+  if (state.safetyBall.bleEvents.length > 80) state.safetyBall.bleEvents.splice(0, state.safetyBall.bleEvents.length - 80);
+  renderSafetyBallBleLog();
+}
+
+async function checkSafetyBallBluetooth() {
+  if (!navigator.bluetooth) {
+    renderSafetyBallBleStatus("이 브라우저는 Web Bluetooth 미지원", "danger");
+    toast("이 브라우저에서는 Web Bluetooth를 사용할 수 없습니다. Windows Edge/Chrome 또는 Android Chrome 계열에서 확인해주세요.", 5500);
+    return false;
+  }
+  try {
+    const available = typeof navigator.bluetooth.getAvailability === "function" ? await navigator.bluetooth.getAvailability() : true;
+    renderSafetyBallBleStatus(available ? "Bluetooth 사용 가능" : "Bluetooth 사용 불가/꺼짐", available ? "ok" : "danger");
+    return available;
+  } catch (error) {
+    renderSafetyBallBleStatus("Bluetooth 상태 확인 실패", "danger");
+    toast(`Bluetooth 상태 확인 실패: ${error.message}`);
+    return false;
+  }
+}
+
+function stopSafetyBallBleDiagnostic({ quiet = false } = {}) {
+  try { state.safetyBall.bleScan?.stop?.(); } catch { /* noop */ }
+  if (state.safetyBall.bleListener && navigator.bluetooth?.removeEventListener) {
+    try { navigator.bluetooth.removeEventListener("advertisementreceived", state.safetyBall.bleListener); } catch { /* noop */ }
+  }
+  state.safetyBall.bleScan = null;
+  state.safetyBall.bleListener = null;
+  state.safetyBall.bleScanning = false;
+  renderSafetyBallBleStatus("BLE 진단 중지", "idle");
+  if (!quiet) toast("Safety Ball BLE 진단을 중지했습니다.");
+}
+
+async function startSafetyBallBleDiagnostic() {
+  if (!(await checkSafetyBallBluetooth())) return;
+  stopSafetyBallBleDiagnostic({ quiet: true });
+  state.safetyBall.bleEvents = [];
+  renderSafetyBallBleLog();
+  try {
+    if (typeof navigator.bluetooth.requestLEScan === "function") {
+      const onAdvertisement = (event) => {
+        appendSafetyBallBleEvent({
+          at: new Date().toISOString(),
+          name: event.device?.name || "",
+          id: event.device?.id || "",
+          rssi: Number.isFinite(event.rssi) ? event.rssi : null,
+          txPower: Number.isFinite(event.txPower) ? event.txPower : null,
+          uuids: Array.isArray(event.uuids) ? event.uuids : [],
+          manufacturerData: safetyBallMapToRaw(event.manufacturerData),
+          serviceData: safetyBallMapToRaw(event.serviceData),
+        });
+        renderSafetyBallBleStatus(`BLE 광고 수신 중 · ${state.safetyBall.bleEvents.length}건`, "ok");
+      };
+      navigator.bluetooth.addEventListener("advertisementreceived", onAdvertisement);
+      const scan = await navigator.bluetooth.requestLEScan({ acceptAllAdvertisements: true, keepRepeatedDevices: true });
+      state.safetyBall.bleScan = scan;
+      state.safetyBall.bleListener = onAdvertisement;
+      state.safetyBall.bleScanning = true;
+      renderSafetyBallBleStatus("BLE 광고 스캔 중", "ok");
+      toast("BLE 광고 진단을 시작했습니다. Safety Ball을 가까이 두고 20~30초 기다려주세요.", 5000);
+      return;
+    }
+
+    const device = await navigator.bluetooth.requestDevice({ acceptAllDevices: true });
+    appendSafetyBallBleEvent({ at: new Date().toISOString(), mode: "device-selector", name: device.name || "", id: device.id || "", note: "이 브라우저는 광고 스캔 API를 제공하지 않아 선택된 장치 정보만 확인했습니다." });
+    renderSafetyBallBleStatus(`장치 확인 · ${device.name || "이름 없음"}`, "ok");
+    toast("장치를 확인했습니다. 광고 원시 데이터 스캔은 현재 브라우저에서 지원되지 않습니다.", 5000);
+  } catch (error) {
+    if (error?.name === "NotFoundError") {
+      renderSafetyBallBleStatus("장치 선택 취소/검색 결과 없음", "idle");
+      return;
+    }
+    renderSafetyBallBleStatus("BLE 진단 실패", "danger");
+    toast(`BLE 진단 실패: ${error.message}`, 5500);
+  }
+}
+
+async function copySafetyBallBleDiagnostic() {
+  const text = state.safetyBall.bleEvents.map((item) => JSON.stringify(item)).join("\n");
+  if (!text) return toast("복사할 BLE 진단 데이터가 없습니다.");
+  try {
+    await navigator.clipboard.writeText(text);
+    toast("BLE 진단 내용을 복사했습니다.");
+  } catch {
+    const box = $("#safetyBallBleLog");
+    if (box) {
+      const range = document.createRange();
+      range.selectNodeContents(box);
+      const selection = getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+    }
+    toast("자동 복사가 차단되었습니다. 진단 내용을 직접 선택해 복사해주세요.");
+  }
+}
+
 function bindEvents() {
   $("#loginForm").addEventListener("submit", login);
   $$('[data-login-role]').forEach((button) => button.addEventListener("click", () => setLoginRole(button.dataset.loginRole)));
@@ -4618,6 +4884,13 @@ function bindEvents() {
   $("#msdsUploadForm")?.addEventListener("submit", uploadMsdsDocument);
   $("#msdsFileInput")?.addEventListener("change", (event) => handleMsdsFileSelection(event.target.files?.[0]));
   $("#msdsDeleteButton")?.addEventListener("click", deleteSelectedMsds);
+  $("#safetyBallRefresh")?.addEventListener("click", () => loadSafetyBallData());
+  $("#safetyBallBleCheck")?.addEventListener("click", checkSafetyBallBluetooth);
+  $("#safetyBallBleStart")?.addEventListener("click", startSafetyBallBleDiagnostic);
+  $("#safetyBallBleStop")?.addEventListener("click", () => stopSafetyBallBleDiagnostic());
+  $("#safetyBallBleCopy")?.addEventListener("click", copySafetyBallBleDiagnostic);
+  $("#safetyBallTestButton")?.addEventListener("click", createSafetyBallTestReading);
+  $("#safetyBallDeviceSelect")?.addEventListener("change", (event) => { state.safetyBall.selectedDeviceId = event.target.value || ""; loadSafetyBallData(); });
   $("#getEmergencyLocation")?.addEventListener("click", updateEmergencyPosition);
   $("#sendEmergencyLocation")?.addEventListener("click", sendEmergencyLocationToAdmin);
   $("#openEmergencyMap")?.addEventListener("click", () => { const url = emergencyMapUrl(); if (url) window.open(url, "_blank", "noopener"); });
@@ -4765,6 +5038,7 @@ function bindEvents() {
   addEventListener("beforeunload", () => {
     if (guard.autoTraining.active) stopAutoTraining("페이지 종료");
     stopStopWorkRollingBuffer();
+    stopSafetyBallBleDiagnostic({ quiet: true });
     if (guard.active) navigator.sendBeacon?.("/api/agents/offline", new Blob([JSON.stringify({ deviceId: getGuardDeviceId() })], { type: "application/json" }));
   });
   document.addEventListener("visibilitychange", () => {
