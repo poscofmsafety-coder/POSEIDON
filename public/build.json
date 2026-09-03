@@ -1,6 +1,6 @@
 {
   "project": "POSEIDON",
-  "version": "6.24.0",
+  "version": "6.25.0",
   "theme": "mythology-command",
   "cloudflare": "workers+d1+durable-objects",
   "durableObjects": "exports-sqlite",
@@ -35,7 +35,7 @@
   "adminNavigation": "overview+live+devices+zones+ppe+dsafety+law+msds+emergency+events+reports+settings",
   "removedAdminModulesUi": "unsafe-behavior+work-environment+heavy-equipment",
   "readability": "larger-ui-fonts+uniform-dsafety-form-labels+uniform-job-meta-text",
-  "branding": "transparent-POSCO-Future-M-CI-home+platform-title+Safety-Don-header",
+  "branding": "transparent-POSCO-Future-M-CI-home+slightly-reduced-CI+platform-title+Safety-Don-header",
   "dashboardHero": "integrated-safety-platform-copy+Pyuming-i+Poseokho-guardian-art",
-  "topbar": "fixed-action-slot+nowrap+device-page-width-containment"
+  "topbar": "fixed-action-slot+nowrap+device-page-width-containment+safety-don-left-balance+no-overlap"
 }

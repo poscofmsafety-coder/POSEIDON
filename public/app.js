@@ -1,4 +1,4 @@
-const POSEIDON_BUILD = "6.24.0";
+const POSEIDON_BUILD = "6.25.0";
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
