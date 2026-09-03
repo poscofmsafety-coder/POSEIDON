@@ -1424,3 +1424,47 @@ body { font-size: 16px; }
 .dsafety-opinion-item>.dsafety-opinion-meta { display:grid; grid-template-columns:1fr 1fr; justify-content:stretch; gap:10px; }
 .dsafety-opinion-item>.dsafety-opinion-content { display:grid; justify-content:stretch; gap:5px; }
 @media (max-width:620px){.dsafety-opinion-item>.dsafety-opinion-meta{grid-template-columns:1fr}}
+
+
+/* POSEIDON V6.18 — D-Safety readability, law keyword highlight, Safety Don branding */
+.sidebar .brand .sidebar-brand-subtitle { margin-top:6px; line-height:1.2; }
+.sidebar .brand .sidebar-brand-subtitle span { display:block; color:#88b7c9; }
+.sidebar .brand .sidebar-brand-subtitle span:first-child { font-size:12px; }
+.sidebar .brand .sidebar-brand-subtitle span:last-child { margin-top:2px; font-size:11px; font-weight:800; letter-spacing:.02em; color:#9fd6e2; }
+
+/* 작업명은 사업장/작업시간 값과 같은 색상·크기로 보이게 강제합니다. */
+.dsafety-meta-job>b,
+.dsafety-meta-job>b .dsafety-job-line,
+.dsafety-meta-job>b .dsafety-job-tail {
+  color:#f2fbfb !important;
+  font-size:17px !important;
+  font-weight:800 !important;
+  line-height:1.5;
+}
+
+/* 위험요인 표의 중첩 세로 스크롤과 sticky 헤더를 없애 휠 스크롤 겹침을 방지합니다. */
+.dsafety-risk-table-wrap {
+  max-height:none !important;
+  overflow-x:auto !important;
+  overflow-y:visible !important;
+  isolation:isolate;
+}
+.dsafety-risk-table th { position:static !important; top:auto !important; z-index:auto !important; }
+
+/* 검색어는 포세이돈 골드 계열 형광펜으로 제목과 본문에서 즉시 식별합니다. */
+.law-query-highlight {
+  display:inline;
+  padding:0 .10em;
+  border-radius:4px;
+  background:linear-gradient(180deg,rgba(255,231,111,.98),rgba(242,194,65,.96));
+  color:#06131d;
+  font-weight:950;
+  box-decoration-break:clone;
+  -webkit-box-decoration-break:clone;
+  box-shadow:0 0 0 1px rgba(255,225,93,.18),0 0 12px rgba(239,199,69,.10);
+}
+
+@media (max-width:700px) {
+  .sidebar .brand .sidebar-brand-subtitle span:first-child { font-size:11px; }
+  .sidebar .brand .sidebar-brand-subtitle span:last-child { font-size:10.5px; }
+}

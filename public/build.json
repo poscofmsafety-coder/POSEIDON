@@ -1,6 +1,6 @@
 {
   "project": "POSEIDON",
-  "version": "6.17.0",
+  "version": "6.18.0",
   "theme": "mythology-command",
   "cloudflare": "workers+d1+durable-objects",
   "durableObjects": "exports-sqlite",
@@ -25,14 +25,15 @@
   "stopWorkVideo": "split-valid-before-after+range-playback",
   "dashboardKpi": "click-through+stop-work-card+remove-total-24h-card",
   "adminZoneEditor": "ppt-style-polygon+rectangle+drag+8handles+x-delete+keyboard-delete",
-  "safetyLawSearch": "KOSHA-smart-search+literal-match-ranking+scroll-full-content+new-field-quick-queries+law.go.kr",
+  "safetyLawSearch": "KOSHA-smart-search+literal-match-ranking+scroll-full-content+keyword-highlighting+fire-watch-quick-query+law.go.kr",
   "smartMsds": "admin-pdf-upload+chunked-d1+search+in-app-viewer+user-readonly+tolerant-pdf-header-validation",
   "emergency119": "editable-site-call+tel-link+browser-geolocation+admin-event+privacy-safe-contacts+report-chart",
-  "dSafetyMeeting": "communication-board+site-date-archive+number-parser+responsibility-order+people-count-card+job-line-format+job-linked-opinions",
+  "dSafetyMeeting": "communication-board+site-date-archive+number-parser+responsibility-order+people-count-card+job-line-format+job-linked-opinions+non-overlap-scroll",
   "privacy": "face-mosaic-live+preview+snapshot+stop-work-video",
   "emergencyContacts": "public-org-defaults+region-filter+admin-add-delete-edit+no-employee-pii-defaults",
   "emergencyUi": "chart-title-safe-padding+admin-image-delete+no-image-save",
   "adminNavigation": "overview+live+devices+zones+ppe+dsafety+law+msds+emergency+events+reports+settings",
   "removedAdminModulesUi": "unsafe-behavior+work-environment+heavy-equipment",
-  "readability": "larger-ui-fonts+uniform-dsafety-form-labels"
+  "readability": "larger-ui-fonts+uniform-dsafety-form-labels+uniform-job-meta-text",
+  "branding": "POSCO Future M+Safety Don"
 }

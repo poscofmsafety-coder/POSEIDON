@@ -1,4 +1,4 @@
-const POSEIDON_BUILD = "6.17.0";
+const POSEIDON_BUILD = "6.18.0";
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -426,7 +426,32 @@ function lawCategoryLabel(type) {
   return "공식자료";
 }
 
-function lawResultCard(item, type) {
+function escapeLawRegex(value) {
+  return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function lawHighlightTerms(query) {
+  const phrase = String(query || "").trim();
+  if (!phrase) return [];
+  const terms = [phrase, ...phrase.split(/\s+/)]
+    .map((item) => item.trim())
+    .filter(Boolean);
+  return [...new Set(terms)].sort((a, b) => b.length - a.length);
+}
+
+function highlightLawText(value, query) {
+  const source = String(value ?? "");
+  const terms = lawHighlightTerms(query);
+  if (!terms.length) return escapeHtml(source);
+  const pattern = terms.map(escapeLawRegex).filter(Boolean).join("|");
+  if (!pattern) return escapeHtml(source);
+  const matcher = new RegExp(`(${pattern})`, "gi");
+  return source.split(matcher).map((part, index) => index % 2
+    ? `<mark class="law-query-highlight">${escapeHtml(part)}</mark>`
+    : escapeHtml(part)).join("");
+}
+
+function lawResultCard(item, type, query) {
   const badge = lawCategoryLabel(type);
   const category = item.categoryName || badge;
   const content = item.content || "검색된 공식 자료의 원문을 확인하세요.";
@@ -438,10 +463,10 @@ function lawResultCard(item, type) {
       <div class="law-result-badge-row"><span class="law-result-badge ${escapeHtml(type)}">${escapeHtml(badge)}</span>${directMatch ? `<span class="law-match-badge">검색어 일치</span>` : ""}</div>
       <small>${escapeHtml(source)}</small>
     </div>
-    <h3>${escapeHtml(item.title || "제목 없음")}</h3>
-    <p class="law-result-category">${escapeHtml(category)}</p>
+    <h3>${highlightLawText(item.title || "제목 없음", query)}</h3>
+    <p class="law-result-category">${highlightLawText(category, query)}</p>
     <div class="law-result-scroll-wrap">
-      <div class="law-result-content" data-law-content tabindex="0" role="region" aria-label="${escapeHtml(item.title || "법령")} 내용">${escapeHtml(content)}</div>
+      <div class="law-result-content" data-law-content tabindex="0" role="region" aria-label="${escapeHtml(item.title || "법령")} 내용">${highlightLawText(content, query)}</div>
       <span class="law-scroll-hint" aria-hidden="true">↕ 스크롤해서 전체 내용 보기</span>
     </div>
     <div class="law-result-actions">
@@ -468,7 +493,7 @@ function renderLawResults(data, query) {
     $("#lawResults").innerHTML = `<div class="law-empty-state"><span>⌕</span><h3>검색 결과가 없습니다</h3><p>검색어를 짧게 바꿔보세요. 예: “밀폐공간 적정공기” → “적정공기”</p></div>`;
     return;
   }
-  $("#lawResults").innerHTML = groups.map(([type, title, items]) => `<section class="law-result-group"><div class="law-group-title"><h3>${escapeHtml(title)}</h3><span>${items.length}건</span></div><div class="law-result-grid">${items.map((item) => lawResultCard(item, type)).join("")}</div></section>`).join("");
+  $("#lawResults").innerHTML = groups.map(([type, title, items]) => `<section class="law-result-group"><div class="law-group-title"><h3>${escapeHtml(title)}</h3><span>${items.length}건</span></div><div class="law-result-grid">${items.map((item) => lawResultCard(item, type, query)).join("")}</div></section>`).join("");
 }
 
 async function searchSafetyLaw(query, { navigate = true } = {}) {

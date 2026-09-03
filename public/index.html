@@ -7,7 +7,7 @@
     <meta name="description" content="POSCO Future M 스마트 안전지킴이 - 브라우저 AI 안전 CCTV와 통합 관제" />
     <title>POSEIDON 스마트 안전지킴이 | POSCO Future M</title>
     <link rel="icon" href="/favicon.svg" />
-    <link rel="stylesheet" href="/styles.css?v=6.17.0" />
+    <link rel="stylesheet" href="/styles.css?v=6.18.0" />
   </head>
   <body>
     <div class="login-screen" id="loginScreen" hidden>
@@ -38,7 +38,7 @@
       <aside class="sidebar" id="sidebar">
         <div class="brand">
           <div class="brand-mark poseidon-brand-mark" aria-hidden="true"><img src="/poseidon-mark.svg" alt="" /></div>
-          <div><strong>POSEIDON</strong><small>POSCO Future M · Safety Commander</small></div>
+          <div><strong>POSEIDON</strong><small class="sidebar-brand-subtitle"><span>POSCO Future M</span><span>Safety Don</span></small></div>
         </div>
 
         <div class="product-title"><img src="/poseidon-mark.svg" alt="" /> <span><b>POSEIDON COMMAND</b><small>AI 안전 통합관제</small></span></div>
@@ -112,7 +112,7 @@
               <div class="panel-header"><div><p class="eyebrow">SMART SAFETY LAW</p><h3>스마트 안전보건법령 검색</h3></div><span class="law-live-badge">OFFICIAL</span></div>
               <p>현장에서 궁금한 키워드를 입력하면 산업안전보건법령과 KOSHA GUIDE를 공식 데이터에서 바로 찾습니다.</p>
               <form class="law-quick-form" id="adminLawQuickForm"><input id="adminLawQuickInput" autocomplete="off" maxlength="80" placeholder="예: 밀폐공간, 적정공기, 하역운반기계" /><button class="primary-button" type="submit">검색</button></form>
-              <div class="law-quick-chips"><button type="button" data-law-query="밀폐공간">밀폐공간</button><button type="button" data-law-query="적정공기">적정공기</button><button type="button" data-law-query="하역운반기계">하역운반기계</button><button type="button" data-law-query="접지">접지</button><button type="button" data-law-query="누전차단">누전차단</button></div>
+              <div class="law-quick-chips"><button type="button" data-law-query="밀폐공간">밀폐공간</button><button type="button" data-law-query="적정공기">적정공기</button><button type="button" data-law-query="하역운반기계">하역운반기계</button><button type="button" data-law-query="접지">접지</button><button type="button" data-law-query="화재감시자">화재감시자</button></div>
               <button class="text-button law-more-button" data-goto="law" type="button">법령 검색 화면 열기 →</button>
             </article>
             <article class="panel msds-quick-card">
@@ -213,8 +213,8 @@
               <section class="panel law-quick-card guard-law-card">
                 <div class="panel-header"><div><p class="eyebrow">FIELD LEGAL ASSIST</p><h3>스마트 안전보건법령</h3></div><span class="law-live-badge">현장검색</span></div>
                 <p>작업 중 궁금한 안전보건 법령과 기준을 현장에서 바로 확인합니다.</p>
-                <form class="law-quick-form" id="guardLawQuickForm"><input id="guardLawQuickInput" autocomplete="off" maxlength="80" placeholder="예: 밀폐공간, 접지, 누전차단" /><button class="primary-button" type="submit">검색</button></form>
-                <div class="law-quick-chips"><button type="button" data-law-query="밀폐공간">밀폐공간</button><button type="button" data-law-query="적정공기">적정공기</button><button type="button" data-law-query="하역운반기계">하역운반기계</button><button type="button" data-law-query="접지">접지</button><button type="button" data-law-query="누전차단">누전차단</button></div>
+                <form class="law-quick-form" id="guardLawQuickForm"><input id="guardLawQuickInput" autocomplete="off" maxlength="80" placeholder="예: 밀폐공간, 접지, 화재감시자" /><button class="primary-button" type="submit">검색</button></form>
+                <div class="law-quick-chips"><button type="button" data-law-query="밀폐공간">밀폐공간</button><button type="button" data-law-query="적정공기">적정공기</button><button type="button" data-law-query="하역운반기계">하역운반기계</button><button type="button" data-law-query="접지">접지</button><button type="button" data-law-query="화재감시자">화재감시자</button></div>
                 <button class="text-button law-more-button" data-goto="law" type="button">상세 법령 검색 →</button>
               </section>
               <section class="panel msds-quick-card guard-msds-card">
@@ -312,13 +312,13 @@
           <section class="panel law-search-hero">
             <div class="law-search-symbol" aria-hidden="true">§</div>
             <div class="law-search-main">
-              <div><p class="eyebrow">SEARCH SAFETY RULES & GUIDES</p><h3>현장 질문을 그대로 입력하세요</h3><p>예: “밀폐공간”, “적정공기”, “하역운반기계”, “접지”, “누전차단”</p></div>
+              <div><p class="eyebrow">SEARCH SAFETY RULES & GUIDES</p><h3>현장 질문을 그대로 입력하세요</h3><p>예: “밀폐공간”, “적정공기”, “하역운반기계”, “접지”, “화재감시자”</p></div>
               <form class="law-search-form" id="lawSearchForm">
                 <input id="lawSearchInput" autocomplete="off" maxlength="80" placeholder="검색어를 입력하세요" aria-label="안전보건법령 검색어" />
                 <button class="primary-button" id="lawSearchButton" type="submit">법령 검색</button>
               </form>
               <div class="law-suggestion-row" aria-label="빠른 검색어">
-                <button type="button" data-law-query="밀폐공간">밀폐공간</button><button type="button" data-law-query="적정공기">적정공기</button><button type="button" data-law-query="하역운반기계">하역운반기계</button><button type="button" data-law-query="접지">접지</button><button type="button" data-law-query="누전차단">누전차단</button>
+                <button type="button" data-law-query="밀폐공간">밀폐공간</button><button type="button" data-law-query="적정공기">적정공기</button><button type="button" data-law-query="하역운반기계">하역운반기계</button><button type="button" data-law-query="접지">접지</button><button type="button" data-law-query="화재감시자">화재감시자</button>
               </div>
             </div>
           </section>
@@ -567,6 +567,6 @@
     <div class="sidebar-scrim" id="sidebarScrim"></div>
 
     <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js" defer></script>
-    <script type="module" src="/app.js?v=6.17.0"></script>
+    <script type="module" src="/app.js?v=6.18.0"></script>
   </body>
 </html>
