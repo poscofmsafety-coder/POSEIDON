@@ -1,4 +1,6 @@
-> Current build: **V6.20.0** — CI-only sidebar home branding and Safety Don topbar.
+> Current UI patch: POSEIDON V6.21 — CI/topbar alignment and simplified sidebar branding.
+
+> Current build: **V6.21.0** — CI/topbar row alignment, CI-only branding, and simplified sidebar navigation.
 
 # POSEIDON v6.5
 

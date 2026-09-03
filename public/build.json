@@ -1,6 +1,6 @@
 {
   "project": "POSEIDON",
-  "version": "6.20.0",
+  "version": "6.21.0",
   "theme": "mythology-command",
   "cloudflare": "workers+d1+durable-objects",
   "durableObjects": "exports-sqlite",
