@@ -1,3 +1,7 @@
+> Current UI patch: POSEIDON V6.22 — approved main dashboard header layout.
+
+> Current build: **V6.22.0** — transparent POSCO Future M CI, platform title, Safety Don copy, and aligned responsive topbar.
+
 > Current UI patch: POSEIDON V6.21 — CI/topbar alignment and simplified sidebar branding.
 
 > Current build: **V6.21.0** — CI/topbar row alignment, CI-only branding, and simplified sidebar navigation.
