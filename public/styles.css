@@ -2358,3 +2358,124 @@ html {
   .safety-ball-gauge { max-width: 220px; }
   .safety-ball-app-meta { grid-template-columns: 1fr; }
 }
+
+/* POSEIDON V6.31 — D-Safety breathing room + approved guardian login background */
+.login-screen {
+  background:
+    linear-gradient(90deg, rgba(1, 8, 18, .74) 0%, rgba(1, 9, 20, .58) 48%, rgba(2, 14, 28, .50) 100%),
+    url('/poseidon-login-background.png') center center / cover no-repeat;
+}
+
+/* D-Safety import / retention cards: keep headings and controls away from borders. */
+.dsafety-import-panel,
+.dsafety-management-panel {
+  padding: 28px 30px 30px !important;
+  border-radius: 20px;
+}
+
+.dsafety-import-panel {
+  row-gap: 20px !important;
+}
+
+.dsafety-import-heading {
+  padding: 2px 2px 4px;
+}
+.dsafety-import-heading .eyebrow,
+.dsafety-management-panel > div:first-child .eyebrow {
+  margin: 0 0 8px;
+  line-height: 1.35;
+}
+.dsafety-import-heading h3,
+.dsafety-management-panel > div:first-child h3 {
+  margin: 0 0 10px;
+  line-height: 1.3;
+}
+.dsafety-import-heading p:not(.eyebrow),
+.dsafety-management-panel > div:first-child p:not(.eyebrow) {
+  margin: 0;
+  max-width: 980px;
+  line-height: 1.75;
+}
+
+.dsafety-import-inputs {
+  gap: 16px !important;
+}
+.dsafety-import-inputs label,
+.dsafety-management-panel > label:not(.switch-row) {
+  gap: 9px !important;
+}
+.dsafety-import-inputs label > span,
+.dsafety-management-panel > label:not(.switch-row) {
+  line-height: 1.4;
+}
+.dsafety-import-actions {
+  gap: 12px !important;
+  margin-top: 2px !important;
+}
+.dsafety-import-panel > small {
+  margin-top: 2px;
+  line-height: 1.65 !important;
+}
+
+.dsafety-management-panel {
+  grid-template-columns: minmax(340px, 1.35fr) minmax(260px, .82fr) minmax(180px, .48fr) !important;
+  column-gap: 24px !important;
+  row-gap: 20px !important;
+  align-items: center !important;
+}
+.dsafety-management-panel > div:first-child {
+  align-self: center;
+  padding: 2px 2px 4px;
+}
+.dsafety-management-panel .switch-row.compact {
+  min-height: 76px;
+  padding: 14px 16px;
+  border-radius: 14px;
+}
+.dsafety-management-panel > label:not(.switch-row) select {
+  min-height: 50px;
+}
+.dsafety-management-actions {
+  gap: 12px !important;
+  margin-top: 2px;
+}
+.dsafety-management-actions button {
+  min-height: 46px;
+}
+.dsafety-management-panel > small {
+  margin-top: 0;
+  padding-top: 2px;
+  line-height: 1.6;
+}
+
+@media (max-width: 1180px) {
+  .dsafety-management-panel {
+    grid-template-columns: 1fr 1fr !important;
+  }
+  .dsafety-management-panel > div:first-child {
+    grid-column: 1 / -1;
+  }
+  .dsafety-management-actions,
+  .dsafety-management-panel > small {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 700px) {
+  .login-screen {
+    background-position: 68% center;
+  }
+  .dsafety-import-panel,
+  .dsafety-management-panel {
+    padding: 22px 18px 24px !important;
+  }
+  .dsafety-management-panel {
+    grid-template-columns: 1fr !important;
+    gap: 16px !important;
+  }
+  .dsafety-management-panel > div:first-child,
+  .dsafety-management-actions,
+  .dsafety-management-panel > small {
+    grid-column: auto;
+  }
+}

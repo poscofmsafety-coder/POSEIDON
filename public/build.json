@@ -1,6 +1,6 @@
 {
   "project": "POSEIDON",
-  "version": "6.30.0",
+  "version": "6.31.0",
   "theme": "mythology-command",
   "cloudflare": "workers+d1+durable-objects",
   "durableObjects": "exports-sqlite",
@@ -40,5 +40,7 @@
   "topbar": "fixed-action-slot+nowrap+device-page-width-containment+safety-don-left-balance+no-overlap",
   "smartSafetyBall": "app-style-monitor+O2+CO+H2S+battery+gps+live-history+device-calibration-management+30d-retention+session-auth-ingest",
   "heroImageFit": "full-body-trident-visible+object-contain+responsive-aspect-ratio",
-  "safetyBallUi": "app-inspired-primary-gauges+multi-device-monitor+panel-safe-padding"
+  "safetyBallUi": "app-inspired-primary-gauges+multi-device-monitor+panel-safe-padding",
+  "loginBackground": "approved-Pyuming-i+Poseokho-dashboard-art",
+  "dSafetyPanelSpacing": "roomy-import+retention-management-panels"
 }
