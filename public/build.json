@@ -1,6 +1,6 @@
 {
   "project": "POSEIDON",
-  "version": "6.28.0",
+  "version": "6.27.0",
   "theme": "mythology-command",
   "cloudflare": "workers+d1+durable-objects",
   "durableObjects": "exports-sqlite",
@@ -38,5 +38,5 @@
   "branding": "transparent-POSCO-Future-M-CI-home+slightly-reduced-CI+platform-title+Safety-Don-header",
   "dashboardHero": "integrated-safety-platform-copy+Pyuming-i+Poseokho-guardian-art",
   "topbar": "fixed-action-slot+nowrap+device-page-width-containment+safety-don-left-balance+no-overlap",
-  "smartSafetyBall": "monitoring-only-ui+O2+CO+H2S+battery+gps+live-history+device-calibration-management+30d-retention+session-auth-ingest"
+  "smartSafetyBall": "keyless-local-ble+poseidon-session-auth+raw-ble-diagnostic+O2+CO+H2S+battery+gps+live-history+30d-retention"
 }
