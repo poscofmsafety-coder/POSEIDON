@@ -2479,3 +2479,68 @@ html {
     grid-column: auto;
   }
 }
+
+
+/* POSEIDON V6.32 — login title line break + readable logout button */
+.login-card .login-title-split {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  margin: 10px 0 16px;
+  line-height: 1.06;
+  word-break: keep-all;
+}
+.login-title-line {
+  display: block;
+  white-space: nowrap;
+}
+.login-title-brand {
+  font-size: .88em;
+  letter-spacing: .045em;
+}
+
+.logout-button {
+  width: auto !important;
+  min-width: 98px !important;
+  padding: 0 14px !important;
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  white-space: nowrap;
+  font-weight: 800;
+}
+.logout-button span {
+  flex: 0 0 auto;
+  font-size: 16px;
+  line-height: 1;
+}
+.logout-button b {
+  display: inline-block;
+  white-space: nowrap;
+  font-size: 13px;
+  line-height: 1;
+}
+
+@media (max-width: 1520px) and (min-width: 821px) {
+  .logout-button {
+    min-width: 92px !important;
+    padding-inline: 12px !important;
+  }
+  .logout-button b { font-size: 12px; }
+}
+
+@media (max-width: 700px) {
+  .login-card .login-title-split {
+    gap: 2px;
+    margin-bottom: 14px;
+  }
+  .login-title-line { white-space: normal; }
+  .logout-button {
+    min-width: 84px !important;
+    padding-inline: 10px !important;
+    gap: 5px;
+  }
+  .logout-button b { font-size: 11px; }
+}

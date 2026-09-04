@@ -7,7 +7,7 @@
     <meta name="description" content="POSCO Future M POSEIDON - AI 관제, D-안전소통보드, 안전보건법령, MSDS, 비상대응을 통합한 안전보건관리 플랫폼" />
     <title>POSEIDON 스마트 안전지킴이 | POSCO Future M</title>
     <link rel="icon" href="/favicon.svg" />
-    <link rel="stylesheet" href="/styles.css?v=6.31.0" />
+    <link rel="stylesheet" href="/styles.css?v=6.32.0" />
   </head>
   <body>
     <div class="login-screen" id="loginScreen" hidden>
@@ -19,7 +19,7 @@
           <div><strong>POSEIDON</strong><small>POSCO Future M · AI Safety Guardian</small></div>
         </div>
         <p class="eyebrow">POSEIDON · AI SAFETY COMMAND</p>
-        <h1 id="loginTitle">POSEIDON 스마트 안전지킴이</h1>
+        <h1 id="loginTitle" class="login-title-split"><span class="login-title-line login-title-brand">POSEIDON</span><span class="login-title-line">스마트 안전지킴이</span></h1>
         <p class="login-copy">삼지창처럼 <b>감지 · 판단 · 전파</b>의 세 축으로 위험을 포착합니다. 관리자는 전체 현장을 통합 관제하고 현장 사용자는 브라우저에서 즉시 지킴이를 시작합니다.</p><div class="poseidon-oath"><span>⚡</span><div><b>SAFETY UNDER COMMAND</b><small>위험은 숨지 못하고, 안전은 더 빨리 도착합니다.</small></div></div>
         <div class="role-tabs" role="tablist" aria-label="접속 모드">
           <button class="role-tab active" data-login-role="admin" type="button">관리자 모드</button>
@@ -92,7 +92,7 @@
             <div class="system-chip admin-only"><span class="pulse-dot"></span>AI 관제 운영 중</div>
             <span class="role-badge" id="roleBadge">관리자</span>
             <div class="clock" id="clock"></div>
-            <button class="icon-button" id="logoutButton" title="로그아웃" type="button">⇥</button>
+            <button class="icon-button logout-button" id="logoutButton" title="로그아웃" aria-label="로그아웃" type="button"><span aria-hidden="true">⇥</span><b>로그아웃</b></button>
           </div>
         </header>
 
@@ -678,6 +678,6 @@
     <div class="sidebar-scrim" id="sidebarScrim"></div>
 
     <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js" defer></script>
-    <script type="module" src="/app.js?v=6.31.0"></script>
+    <script type="module" src="/app.js?v=6.32.0"></script>
   </body>
 </html>

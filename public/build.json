@@ -1,6 +1,6 @@
 {
   "project": "POSEIDON",
-  "version": "6.31.0",
+  "version": "6.32.0",
   "theme": "mythology-command",
   "cloudflare": "workers+d1+durable-objects",
   "durableObjects": "exports-sqlite",
@@ -42,5 +42,7 @@
   "heroImageFit": "full-body-trident-visible+object-contain+responsive-aspect-ratio",
   "safetyBallUi": "app-inspired-primary-gauges+multi-device-monitor+panel-safe-padding",
   "loginBackground": "approved-Pyuming-i+Poseokho-dashboard-art",
-  "dSafetyPanelSpacing": "roomy-import+retention-management-panels"
+  "dSafetyPanelSpacing": "roomy-import+retention-management-panels",
+  "loginTitle": "two-line-poseidon-smart-safety-guardian",
+  "logoutButton": "icon+text-readable"
 }
