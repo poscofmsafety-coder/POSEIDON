@@ -138,12 +138,25 @@ const SCHEMA = [
     recorded_at TEXT NOT NULL,
     created_at TEXT NOT NULL
   )`,
+  `CREATE TABLE IF NOT EXISTS safety_ball_devices (
+    device_id TEXT PRIMARY KEY,
+    display_name TEXT NOT NULL DEFAULT '',
+    site TEXT NOT NULL DEFAULT '',
+    serial_no TEXT NOT NULL DEFAULT '',
+    calibration_date TEXT NOT NULL DEFAULT '',
+    calibration_due_date TEXT NOT NULL DEFAULT '',
+    calibration_org TEXT NOT NULL DEFAULT '',
+    note TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`,
   `CREATE TABLE IF NOT EXISTS app_settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL,
     updated_at TEXT NOT NULL
   )`,
   `CREATE INDEX IF NOT EXISTS idx_safety_ball_device_time ON safety_ball_readings(device_id, recorded_at DESC)`,
+  `CREATE INDEX IF NOT EXISTS idx_safety_ball_devices_site ON safety_ball_devices(site, updated_at DESC)`,
   `CREATE INDEX IF NOT EXISTS idx_safety_ball_recorded ON safety_ball_readings(recorded_at DESC)`,
   `CREATE INDEX IF NOT EXISTS idx_msds_title ON msds_documents(title)`,
   `CREATE INDEX IF NOT EXISTS idx_msds_uploaded ON msds_documents(uploaded_at DESC)`,
@@ -1871,6 +1884,9 @@ async function insertSafetyBallReading(env, input) {
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
     .bind(id, item.deviceId, item.site, item.o2, item.co, item.h2s, item.battery, item.latitude, item.longitude, item.alarm, item.alarmType, item.source, item.recordedAt, createdAt)
     .run();
+  const currentDevice = await env.DB.prepare("SELECT device_id,site FROM safety_ball_devices WHERE device_id=?").bind(item.deviceId).first();
+  if (!currentDevice) await upsertSafetyBallDeviceConfig(env, item.deviceId, { site: item.site });
+  else if (!currentDevice.site && item.site) await upsertSafetyBallDeviceConfig(env, item.deviceId, { site: item.site });
   return { id, ...item, createdAt };
 }
 
@@ -1893,17 +1909,89 @@ function mapSafetyBallRow(row) {
   };
 }
 
+function normalizeSafetyBallDeviceConfig(deviceId, input = {}) {
+  const cleanId = String(deviceId || input.deviceId || input.device_id || "").trim().slice(0, 120);
+  if (!cleanId) throw new Error("Safety Ball 장치 ID가 필요합니다.");
+  const cleanDate = (value) => /^\d{4}-\d{2}-\d{2}$/.test(String(value || "").trim()) ? String(value).trim() : "";
+  return {
+    deviceId: cleanId,
+    displayName: String(input.displayName || input.name || "").trim().slice(0, 120),
+    site: String(input.site || "").trim().slice(0, 120),
+    serialNo: String(input.serialNo || input.serial_no || "").trim().slice(0, 120),
+    calibrationDate: cleanDate(input.calibrationDate || input.calibration_date),
+    calibrationDueDate: cleanDate(input.calibrationDueDate || input.calibration_due_date),
+    calibrationOrg: String(input.calibrationOrg || input.calibration_org || "").trim().slice(0, 120),
+    note: String(input.note || "").trim().slice(0, 240),
+  };
+}
+
+function mapSafetyBallDeviceRow(row) {
+  if (!row) return null;
+  return {
+    deviceId: row.device_id,
+    displayName: row.display_name || "",
+    site: row.site || "",
+    serialNo: row.serial_no || "",
+    calibrationDate: row.calibration_date || "",
+    calibrationDueDate: row.calibration_due_date || "",
+    calibrationOrg: row.calibration_org || "",
+    note: row.note || "",
+    createdAt: row.created_at || "",
+    updatedAt: row.updated_at || "",
+  };
+}
+
+async function upsertSafetyBallDeviceConfig(env, deviceId, input = {}) {
+  const item = normalizeSafetyBallDeviceConfig(deviceId, input);
+  const existing = await env.DB.prepare("SELECT * FROM safety_ball_devices WHERE device_id=?").bind(item.deviceId).first();
+  const now = nowIso();
+  const merged = existing ? {
+    ...mapSafetyBallDeviceRow(existing),
+    ...item,
+    displayName: Object.prototype.hasOwnProperty.call(input, "displayName") || Object.prototype.hasOwnProperty.call(input, "name") ? item.displayName : (existing.display_name || ""),
+    site: Object.prototype.hasOwnProperty.call(input, "site") ? item.site : (existing.site || ""),
+    serialNo: Object.prototype.hasOwnProperty.call(input, "serialNo") || Object.prototype.hasOwnProperty.call(input, "serial_no") ? item.serialNo : (existing.serial_no || ""),
+    calibrationDate: Object.prototype.hasOwnProperty.call(input, "calibrationDate") || Object.prototype.hasOwnProperty.call(input, "calibration_date") ? item.calibrationDate : (existing.calibration_date || ""),
+    calibrationDueDate: Object.prototype.hasOwnProperty.call(input, "calibrationDueDate") || Object.prototype.hasOwnProperty.call(input, "calibration_due_date") ? item.calibrationDueDate : (existing.calibration_due_date || ""),
+    calibrationOrg: Object.prototype.hasOwnProperty.call(input, "calibrationOrg") || Object.prototype.hasOwnProperty.call(input, "calibration_org") ? item.calibrationOrg : (existing.calibration_org || ""),
+    note: Object.prototype.hasOwnProperty.call(input, "note") ? item.note : (existing.note || ""),
+  } : item;
+  await env.DB.prepare(`INSERT INTO safety_ball_devices
+    (device_id,display_name,site,serial_no,calibration_date,calibration_due_date,calibration_org,note,created_at,updated_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?)
+    ON CONFLICT(device_id) DO UPDATE SET
+      display_name=excluded.display_name,site=excluded.site,serial_no=excluded.serial_no,
+      calibration_date=excluded.calibration_date,calibration_due_date=excluded.calibration_due_date,
+      calibration_org=excluded.calibration_org,note=excluded.note,updated_at=excluded.updated_at`)
+    .bind(merged.deviceId, merged.displayName || "", merged.site || "", merged.serialNo || "", merged.calibrationDate || "", merged.calibrationDueDate || "", merged.calibrationOrg || "", merged.note || "", existing?.created_at || now, now)
+    .run();
+  return mapSafetyBallDeviceRow(await env.DB.prepare("SELECT * FROM safety_ball_devices WHERE device_id=?").bind(item.deviceId).first());
+}
+
+async function listSafetyBallDevices(env) {
+  const result = await env.DB.prepare("SELECT * FROM safety_ball_devices ORDER BY site COLLATE NOCASE, display_name COLLATE NOCASE, device_id COLLATE NOCASE").all();
+  return (result.results || []).map(mapSafetyBallDeviceRow);
+}
+
+async function safetyBallConfigMap(env) {
+  const items = await listSafetyBallDevices(env);
+  return new Map(items.map((item) => [item.deviceId, item]));
+}
+
 async function getSafetyBallLatest(env) {
   const result = await env.DB.prepare(`SELECT r.* FROM safety_ball_readings r
     INNER JOIN (SELECT device_id, MAX(recorded_at) AS max_recorded_at FROM safety_ball_readings GROUP BY device_id) x
       ON x.device_id=r.device_id AND x.max_recorded_at=r.recorded_at
     ORDER BY r.recorded_at DESC LIMIT 100`).all();
+  const configs = await safetyBallConfigMap(env);
   const seen = new Set();
   const items = [];
   for (const row of result.results || []) {
     if (seen.has(row.device_id)) continue;
     seen.add(row.device_id);
-    items.push(mapSafetyBallRow(row));
+    const reading = mapSafetyBallRow(row);
+    const config = configs.get(row.device_id) || {};
+    items.push({ ...reading, ...config, site: config.site || reading.site || "", deviceId: reading.deviceId });
   }
   return items;
 }
@@ -1989,7 +2077,7 @@ async function handleApi(request, env, ctx) {
     if (!readings.length) return error("수신할 Safety Ball 데이터가 없습니다.");
     const stored = [];
     for (const reading of readings) {
-      const normalized = { ...reading, source: String(reading?.source || "poseidon-browser-ble") };
+      const normalized = { ...reading, source: String(reading?.source || "safety-ball-receiver") };
       stored.push(await insertSafetyBallReading(env, normalized));
     }
     return json({ ok: true, data: { accepted: stored.length, items: stored, auth: "poseidon-session" } }, 201);
@@ -2058,28 +2146,27 @@ async function handleApi(request, env, ctx) {
     ]);
     return json({ ok: true, data: { id, deleted: true, stats: await getMsdsStats(env) } });
   }
+  if (path === "/api/safety-ball/devices" && method === "GET") {
+    return json({ ok: true, data: { items: await listSafetyBallDevices(env) } });
+  }
+  const safetyBallDeviceMatch = path.match(/^\/api\/safety-ball\/devices\/([^/]+)$/);
+  if (safetyBallDeviceMatch && method === "PUT") {
+    if (!isAdmin) return error("Safety Ball 장치·검교정 수정은 관리자 권한이 필요합니다.", 403);
+    const deviceId = decodeURIComponent(safetyBallDeviceMatch[1]);
+    const body = await readJson(request);
+    return json({ ok: true, data: await upsertSafetyBallDeviceConfig(env, deviceId, body) });
+  }
+  if (safetyBallDeviceMatch && method === "DELETE") {
+    if (!isAdmin) return error("Safety Ball 장치 정보 삭제는 관리자 권한이 필요합니다.", 403);
+    const deviceId = decodeURIComponent(safetyBallDeviceMatch[1]);
+    await env.DB.prepare("DELETE FROM safety_ball_devices WHERE device_id=?").bind(deviceId).run();
+    return json({ ok: true, data: { deviceId, deleted: true, readingsPreserved: true } });
+  }
   if (path === "/api/safety-ball/latest" && method === "GET") {
     return json({ ok: true, data: { items: await getSafetyBallLatest(env), retentionDays: 30 } });
   }
   if (path === "/api/safety-ball/history" && method === "GET") {
     return json({ ok: true, data: { items: await getSafetyBallHistory(env, url), retentionDays: 30 } });
-  }
-  if (path === "/api/safety-ball/test" && method === "POST") {
-    if (!isAdmin) return error("Safety Ball 테스트는 관리자 권한이 필요합니다.", 403);
-    const body = await readJson(request).catch(() => ({}));
-    const now = Date.now();
-    const sample = {
-      deviceId: String(body.deviceId || "SAFETY-BALL-DEMO-01"),
-      site: String(body.site || "연동 테스트"),
-      o2: Number((20.7 + Math.random() * 0.4).toFixed(1)),
-      co: Number((Math.random() * 4).toFixed(1)),
-      h2s: Number((Math.random() * 1.5).toFixed(1)),
-      battery: Math.round(72 + Math.random() * 24),
-      alarm: false,
-      source: "poseidon-demo",
-      recordedAt: new Date(now).toISOString(),
-    };
-    return json({ ok: true, data: await insertSafetyBallReading(env, sample) }, 201);
   }
 
   if (path === "/api/emergency/config" && method === "GET") return json({ ok: true, data: await getEmergencyConfig(env) });

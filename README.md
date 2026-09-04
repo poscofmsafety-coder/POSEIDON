@@ -1,5 +1,5 @@
 
-> Current build: **V6.27.0** — Smart Safety Ball keyless local-Bluetooth diagnostic, POSEIDON session-authenticated ingest, O2/CO/H2S/battery/GPS live view and 30-day history retention.
+> Current build: **V6.28.0** — Smart Safety Ball gas-monitoring dashboard focused on O2/CO/H2S, measurement history, device status, and calibration management; browser pairing diagnostics removed.
 
 > Current UI patch: POSEIDON V6.22 — approved main dashboard header layout.
 
@@ -241,3 +241,10 @@ Cloudflare Secret:
 - 광고 스캔이 지원되지 않으면 브라우저 장치 선택 방식으로 최소 연결 가능 여부를 확인합니다.
 - 실제 O2/CO/H2S 자동 해석은 현장에서 수집한 BLE 원시 패킷과 Safety Ball 앱 수치를 대조한 뒤 매핑합니다.
 - 기존 O2/CO/H2S/배터리/GPS 저장, 현황, 이력, 30일 정리는 유지합니다.
+
+## V6.28 스마트 세이프티 볼 — 가스 모니터링·검교정 중심
+- 브라우저 BLE 페어링/장치 선택/진단 화면 제거
+- O2·CO·H2S·배터리·GPS·최근 수신·경보·측정 이력 중심 UI
+- 관리자 장치 ID/장치명/사업장/일련번호/검교정일/다음 검교정일/기관/비고 관리
+- 검교정 유효/30일 이내 예정/만료/미등록 상태 표시
+- 기존 POSEIDON 로그인 세션 기반 수신 API 유지, 별도 Safety Ball 키 없음
