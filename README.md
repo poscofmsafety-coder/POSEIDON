@@ -248,3 +248,6 @@ Cloudflare Secret:
 - 관리자 장치 ID/장치명/사업장/일련번호/검교정일/다음 검교정일/기관/비고 관리
 - 검교정 유효/30일 이내 예정/만료/미등록 상태 표시
 - 기존 POSEIDON 로그인 세션 기반 수신 API 유지, 별도 Safety Ball 키 없음
+
+## V6.29 dashboard guardian image
+메인 대시보드의 퓨밍이·포석호 이미지를 최신 승인 이미지로 교체하고 `object-fit: contain`과 고정 비율을 적용해 캐릭터의 팔다리와 삼지창이 잘리지 않도록 보완했습니다.
