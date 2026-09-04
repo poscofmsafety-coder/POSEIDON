@@ -7,7 +7,7 @@
     <meta name="description" content="POSCO Future M POSEIDON - AI 관제, D-안전소통보드, 안전보건법령, MSDS, 비상대응을 통합한 안전보건관리 플랫폼" />
     <title>POSEIDON 스마트 안전지킴이 | POSCO Future M</title>
     <link rel="icon" href="/favicon.svg" />
-    <link rel="stylesheet" href="/styles.css?v=6.29.0" />
+    <link rel="stylesheet" href="/styles.css?v=6.30.0" />
   </head>
   <body>
     <div class="login-screen" id="loginScreen" hidden>
@@ -408,6 +408,34 @@
             </div>
           </div>
 
+          <section class="panel safety-ball-app-panel" aria-label="Safety Ball 앱형 실시간 가스 화면">
+            <div class="safety-ball-app-topbar">
+              <div class="safety-ball-app-title">
+                <p class="eyebrow">SMART SAFETY BALL</p>
+                <h3 id="safetyBallPrimaryName">수신 대기</h3>
+                <small id="safetyBallPrimarySite">측정 장치의 데이터를 기다리고 있습니다.</small>
+              </div>
+              <div class="safety-ball-app-controls">
+                <label>장치 선택<select id="safetyBallPrimarySelect"><option value="">자동 선택</option></select></label>
+                <span class="safety-ball-live-status idle" id="safetyBallPrimaryStatus">수신 대기</span>
+                <div class="safety-ball-battery" id="safetyBallPrimaryBattery"><span>배터리</span><b>--%</b></div>
+              </div>
+            </div>
+
+            <div class="safety-ball-app-gauges" id="safetyBallPrimaryGauges">
+              <article class="safety-ball-gauge o2"><span>O2</span><strong id="safetyBallPrimaryO2">--</strong><small>%</small></article>
+              <article class="safety-ball-gauge co"><span>CO</span><strong id="safetyBallPrimaryCO">--</strong><small>ppm</small></article>
+              <article class="safety-ball-gauge h2s"><span>H2S</span><strong id="safetyBallPrimaryH2S">--</strong><small>ppm</small></article>
+            </div>
+
+            <div class="safety-ball-app-meta">
+              <div><span>최근 수신</span><b id="safetyBallPrimaryReceived">-</b></div>
+              <div><span>경보 상태</span><b id="safetyBallPrimaryAlarm">수신 대기</b></div>
+              <div><span>GPS 위치</span><b id="safetyBallPrimaryLocation">-</b></div>
+              <div><span>검교정</span><b id="safetyBallPrimaryCalibration">미등록</b></div>
+            </div>
+          </section>
+
           <section class="safety-ball-summary-grid" aria-label="세이프티 볼 현황 요약">
             <article class="panel safety-ball-summary-card"><span>등록 장치</span><strong id="safetyBallSummaryRegistered">0대</strong><small>가스 측정 장치</small></article>
             <article class="panel safety-ball-summary-card"><span>최근 수신</span><strong id="safetyBallSummaryOnline">0대</strong><small>최근 5분 이내</small></article>
@@ -417,7 +445,7 @@
 
           <section class="panel safety-ball-overview-panel">
             <div class="panel-header">
-              <div><p class="eyebrow">LIVE GAS STATUS</p><h3>실시간 가스 농도</h3></div>
+              <div><p class="eyebrow">FIELD DEVICES</p><h3>현장별 세이프티 볼</h3></div>
               <span class="safety-ball-count" id="safetyBallDeviceCount">0대</span>
             </div>
             <div class="safety-ball-live-grid" id="safetyBallLiveGrid">
@@ -650,6 +678,6 @@
     <div class="sidebar-scrim" id="sidebarScrim"></div>
 
     <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js" defer></script>
-    <script type="module" src="/app.js?v=6.29.0"></script>
+    <script type="module" src="/app.js?v=6.30.0"></script>
   </body>
 </html>

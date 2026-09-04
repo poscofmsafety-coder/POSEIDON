@@ -251,3 +251,9 @@ Cloudflare Secret:
 
 ## V6.29 dashboard guardian image
 메인 대시보드의 퓨밍이·포석호 이미지를 최신 승인 이미지로 교체하고 `object-fit: contain`과 고정 비율을 적용해 캐릭터의 팔다리와 삼지창이 잘리지 않도록 보완했습니다.
+
+## V6.30 Smart Safety Ball 앱형 모니터 UI
+- Safety Ball의 실제 운용정보(O2/CO/H2S/배터리/위치/경보/검교정)를 중심으로 앱형 3가스 게이지 화면 추가
+- 현장별 다중 장치 카드, 측정이력, 검교정 관리 기능 유지
+- 실시간 가스 농도/장치·검교정/가스 측정 이력 패널에 충분한 내부 여백 적용
+- Safety Ball 네이티브 iPhone 앱을 웹페이지 안에서 직접 실행/임베드하지는 않으며, 실제 데이터는 기존 POSEIDON 수신 API를 통해 표시

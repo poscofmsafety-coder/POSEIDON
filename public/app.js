@@ -4657,6 +4657,70 @@ function renderSafetyBallSummary() {
   if ($("#safetyBallSummaryCalibration")) $("#safetyBallSummaryCalibration").textContent = `${calibration}대`;
 }
 
+function safetyBallPlainNumber(value, digits = 1) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "--";
+  return number.toFixed(digits);
+}
+
+function renderSafetyBallPrimary() {
+  const latest = Array.isArray(state.safetyBall.latest) ? state.safetyBall.latest : [];
+  const devices = Array.isArray(state.safetyBall.devices) ? state.safetyBall.devices : [];
+  const configs = new Map(devices.map((item) => [item.deviceId, item]));
+  const selectedId = state.safetyBall.selectedDeviceId || "";
+  const item = (selectedId ? latest.find((x) => x.deviceId === selectedId) : null) || latest[0] || null;
+  const config = item ? (configs.get(item.deviceId) || {}) : (selectedId ? (configs.get(selectedId) || null) : null);
+  const merged = item ? { ...config, ...item } : config;
+
+  const name = merged?.displayName || merged?.deviceId || "수신 대기";
+  const site = merged?.site || (merged ? "사업장 미지정" : "측정 장치의 데이터를 기다리고 있습니다.");
+  const alarm = Boolean(Number(merged?.alarm));
+  const recent = item ? safetyBallIsRecent(item) : false;
+  const calibration = safetyBallCalibrationState(merged || {});
+  const mapLink = merged ? safetyBallMapLink(merged) : "";
+
+  if ($("#safetyBallPrimaryName")) $("#safetyBallPrimaryName").textContent = name;
+  if ($("#safetyBallPrimarySite")) $("#safetyBallPrimarySite").textContent = site;
+  if ($("#safetyBallPrimaryO2")) $("#safetyBallPrimaryO2").textContent = safetyBallPlainNumber(merged?.o2, 1);
+  if ($("#safetyBallPrimaryCO")) $("#safetyBallPrimaryCO").textContent = safetyBallPlainNumber(merged?.co, 1);
+  if ($("#safetyBallPrimaryH2S")) $("#safetyBallPrimaryH2S").textContent = safetyBallPlainNumber(merged?.h2s, 1);
+
+  const status = $("#safetyBallPrimaryStatus");
+  if (status) {
+    status.className = `safety-ball-live-status ${alarm ? "danger" : recent ? "ok" : "idle"}`;
+    status.textContent = alarm ? (merged?.alarmType || "경보") : recent ? "수신 중" : item ? "수신 지연" : "수신 대기";
+  }
+
+  const battery = $("#safetyBallPrimaryBattery");
+  if (battery) {
+    const batteryValue = Number(merged?.battery);
+    battery.classList.toggle("low", Number.isFinite(batteryValue) && batteryValue <= 20);
+    const batteryText = Number.isFinite(batteryValue) ? `${Math.round(batteryValue)}%` : "--%";
+    const b = battery.querySelector("b");
+    if (b) b.textContent = batteryText;
+  }
+
+  if ($("#safetyBallPrimaryReceived")) $("#safetyBallPrimaryReceived").textContent = item?.recordedAt ? formatDate(item.recordedAt) : "-";
+  if ($("#safetyBallPrimaryAlarm")) {
+    const alarmEl = $("#safetyBallPrimaryAlarm");
+    alarmEl.textContent = alarm ? (merged?.alarmType || "경보") : item ? "정상" : "수신 대기";
+    alarmEl.className = alarm ? "danger-text" : "";
+  }
+  if ($("#safetyBallPrimaryLocation")) {
+    const locationEl = $("#safetyBallPrimaryLocation");
+    if (mapLink) locationEl.innerHTML = `<a class="safety-ball-map-link" href="${mapLink}" target="_blank" rel="noopener noreferrer">지도에서 보기 ↗</a>`;
+    else locationEl.textContent = "-";
+  }
+  if ($("#safetyBallPrimaryCalibration")) {
+    const c = $("#safetyBallPrimaryCalibration");
+    c.textContent = calibration.label;
+    c.className = `safety-ball-calibration-pill ${calibration.key}`;
+  }
+
+  const gauges = $("#safetyBallPrimaryGauges");
+  if (gauges) gauges.classList.toggle("alarm", alarm);
+}
+
 function renderSafetyBallLatest() {
   const items = Array.isArray(state.safetyBall.latest) ? state.safetyBall.latest : [];
   const grid = $("#safetyBallLiveGrid");
@@ -4810,14 +4874,22 @@ async function deleteSafetyBallCalibration() {
 }
 
 function syncSafetyBallDeviceSelect() {
-  const select = $("#safetyBallDeviceSelect");
-  if (!select) return;
+  const historySelect = $("#safetyBallDeviceSelect");
+  const primarySelect = $("#safetyBallPrimarySelect");
   const current = state.safetyBall.selectedDeviceId || "";
   const ids = [...new Set([...(state.safetyBall.devices || []).map((item) => item.deviceId), ...(state.safetyBall.latest || []).map((item) => item.deviceId)].filter(Boolean))];
   const configs = new Map((state.safetyBall.devices || []).map((item) => [item.deviceId, item]));
-  select.innerHTML = `<option value="">전체 장치</option>${ids.map((id) => `<option value="${escapeHtml(id)}">${escapeHtml(configs.get(id)?.displayName || id)}</option>`).join("")}`;
-  if (ids.includes(current)) select.value = current;
-  else { select.value = ""; state.safetyBall.selectedDeviceId = ""; }
+  const options = ids.map((id) => `<option value="${escapeHtml(id)}">${escapeHtml(configs.get(id)?.displayName || id)}</option>`).join("");
+  if (historySelect) historySelect.innerHTML = `<option value="">전체 장치</option>${options}`;
+  if (primarySelect) primarySelect.innerHTML = `<option value="">자동 선택</option>${options}`;
+  if (ids.includes(current)) {
+    if (historySelect) historySelect.value = current;
+    if (primarySelect) primarySelect.value = current;
+  } else {
+    if (historySelect) historySelect.value = "";
+    if (primarySelect) primarySelect.value = "";
+    state.safetyBall.selectedDeviceId = "";
+  }
 }
 
 async function loadSafetyBallData({ silent = false } = {}) {
@@ -4834,9 +4906,10 @@ async function loadSafetyBallData({ silent = false } = {}) {
     state.safetyBall.history = Array.isArray(history?.items) ? history.items : [];
     state.safetyBall.devices = Array.isArray(devices?.items) ? devices.items : [];
     renderSafetyBallSummary();
+    syncSafetyBallDeviceSelect();
+    renderSafetyBallPrimary();
     renderSafetyBallLatest();
     renderSafetyBallCalibrationTable();
-    syncSafetyBallDeviceSelect();
     renderSafetyBallHistory();
   } catch (error) {
     if (!silent) toast(`Safety Ball 데이터 오류: ${error.message}`);
@@ -4879,6 +4952,7 @@ function bindEvents() {
   $("#safetyBallCalibrationClear")?.addEventListener("click", clearSafetyBallCalibrationForm);
   $("#safetyBallCalibrationDelete")?.addEventListener("click", deleteSafetyBallCalibration);
   $("#safetyBallDeviceSelect")?.addEventListener("change", (event) => { state.safetyBall.selectedDeviceId = event.target.value || ""; loadSafetyBallData(); });
+  $("#safetyBallPrimarySelect")?.addEventListener("change", (event) => { state.safetyBall.selectedDeviceId = event.target.value || ""; loadSafetyBallData(); });
   $("#getEmergencyLocation")?.addEventListener("click", updateEmergencyPosition);
   $("#sendEmergencyLocation")?.addEventListener("click", sendEmergencyLocationToAdmin);
   $("#openEmergencyMap")?.addEventListener("click", () => { const url = emergencyMapUrl(); if (url) window.open(url, "_blank", "noopener"); });
